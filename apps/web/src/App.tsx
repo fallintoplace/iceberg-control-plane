@@ -13,7 +13,6 @@ import {
   Card,
   CardHeader,
   CardTitle,
-  Collapsible,
   Input,
   Label,
   NativeSelect,
@@ -26,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui'
 import { buttonVariants } from '@/components/ui/button-variants'
+import { WorkerWorkbench } from '@/components/iceberg-go/worker-workbench'
 import { cn } from '@/lib/utils'
 import {
   createCatalog,
@@ -35,15 +35,11 @@ import {
   getNamespaces,
   getTable,
   getTables,
-  getWorkerJob,
   getWorkerStatus,
   getWorkers,
-  submitWorkerJob,
   type NamespaceIdentifier,
   type TableIdentifier,
   type TableSummary,
-  type WorkerJob,
-  type WorkerJobSubmission,
 } from './api'
 
 const ui = {
@@ -145,29 +141,6 @@ const ui = {
   workerLanguage: 'text-xs font-bold text-ink capitalize',
   workerError: 'mt-[15px] text-[11px] text-danger',
   workerEmptyState: 'mt-7',
-  workerJobCard: 'mb-4 grid gap-[14px]',
-  workerJobHeading: 'flex items-center justify-between gap-3 max-[640px]:items-start max-[640px]:flex-col',
-  workerSelectLabel: 'grid min-w-[180px] gap-[5px] max-[640px]:w-full',
-  workerJobRuntime: 'flex items-center gap-[10px] text-[10px] text-[#819094]',
-  workerJobActions: 'flex flex-wrap items-end gap-2 max-[640px]:items-stretch',
-  workerActionButton: 'mt-0 min-h-[34px] px-[11px] py-2 max-[640px]:flex-1',
-  workerRowLimit: 'grid w-[74px] gap-1',
-  workerRowInput: 'h-[34px] px-[9px] py-[7px] text-[11px]',
-  workerConfigLink: 'w-fit no-underline',
-  workerJobOutput: 'grid gap-3 border-t border-[#edf1f0] pt-[14px]',
-  workerJobOutputHeading: 'flex items-center justify-between gap-[10px]',
-  workerJobId: 'font-mono text-[10px] text-[#78878b]',
-  workerResult: 'grid gap-3',
-  workerResultStats: 'flex flex-wrap gap-2',
-  workerResultStat: 'flex min-w-[90px] flex-col gap-1 rounded-md border border-[#e5eeea] bg-[#fafcfb] px-[11px] py-[9px] shadow-none',
-  workerResultStatLabel: 'text-[9px] text-[#859195]',
-  workerResultStatValue: 'text-[13px] font-semibold text-[#34504a]',
-  workerResultTableWrap: 'overflow-x-auto rounded-md border border-[#edf1f0]',
-  workerResultTh: 'bg-[#fafcfb] px-[10px] py-2 text-left text-[9px] font-bold tracking-[.06em] text-[#839094] uppercase',
-  workerResultTd: 'max-w-[320px] overflow-hidden border-t border-[#edf1f0] px-[10px] py-[9px] text-ellipsis whitespace-nowrap text-[#405458]',
-  workerResultCode: 'font-mono text-[10px] text-[#536d67]',
-  workerRawResult: 'text-[10px] text-[#6f7f83]',
-  workerRawPre: 'mt-2 max-h-[300px] overflow-auto rounded-md bg-[#1d302f] p-3 font-mono text-[10px] leading-[1.6] text-[#dce9e4]',
 }
 
 function namespaceKey(namespace: string[]): string {
@@ -510,6 +483,7 @@ function CatalogExplorer() {
   const namespaceItems = namespaces.data?.pages.flatMap((page) => page.namespaces) ?? []
   const tableItems = tables.data?.pages.flatMap((page) => page.tables) ?? []
   const parentNamespace = selectedNamespace.slice(0, -1)
+  const namespaceCount = namespaces.isError ? '—' : namespaces.isPending ? '…' : namespaceItems.length
 
   return (
     <div className={ui.appShell}>
@@ -539,8 +513,8 @@ function CatalogExplorer() {
               onChange={(event) => navigate(`/catalog/${encodeURIComponent(event.target.value)}`)}
             />
             <div className={`${ui.connectionState} ${status.isError ? 'text-danger' : ''}`}>
-              <span className={`${ui.statusDot} ${status.isError ? 'bg-[#c45145]' : ''}`} />
-              {status.isPending ? 'Checking connection' : status.isError ? 'Connection unavailable' : 'Connected'}
+              <span className={`${ui.statusDot} ${status.isPending ? 'bg-[#aab4b4]' : status.isError ? 'bg-[#c45145]' : ''}`} />
+              {status.isPending ? 'Checking catalog API' : status.isError ? 'Catalog API unavailable' : 'Catalog API reachable'}
             </div>
             {status.isError && <p className={ui.sidebarError}>Check the catalog URI and server credentials.</p>}
           </div>
@@ -548,7 +522,7 @@ function CatalogExplorer() {
           <div className={ui.sidebarSectionCompact}>
             <div className={ui.sectionTitleRow}>
               <span className={ui.fieldLabel}>Namespaces</span>
-              <Badge variant="secondary" size="count">{namespaceItems.length}</Badge>
+              <Badge variant={namespaces.isError ? 'destructive' : 'secondary'} size="count">{namespaceCount}</Badge>
             </div>
             <Button variant="ghost" className={`${ui.namespaceLink} ${selectedNamespace.length === 0 ? ui.namespaceLinkActive : ''}`} onClick={() => setLocation([])} type="button">
               <span className={ui.namespaceGlyph} aria-hidden="true"><HomeIcon size={14} /></span>
@@ -602,8 +576,8 @@ function CatalogExplorer() {
               </Breadcrumb>
             </div>
             <div className={ui.headingMeta}>
-              <span className={ui.metaLabel}>REST endpoint</span>
-              <span className={ui.metaValue}>{status.data ? `${status.data.endpoints.length} advertised features` : '—'}</span>
+              <span className={ui.metaLabel}>REST endpoints</span>
+              <span className={ui.metaValue}>{status.data ? `${status.data.endpoints.length} advertised endpoints` : '—'}</span>
             </div>
           </div>
 
@@ -619,10 +593,10 @@ function CatalogExplorer() {
             <Card as="section" className="mb-4">
               <CardHeader className={ui.sectionTitleRow}>
                 <div><p className={ui.eyebrow}>Browse</p><CardTitle>Top-level namespaces</CardTitle></div>
-                <Badge variant="secondary" size="count">{namespaceItems.length}</Badge>
+                <Badge variant={namespaces.isError ? 'destructive' : 'secondary'} size="count">{namespaceCount}</Badge>
               </CardHeader>
               {namespaces.isError && <ErrorMessage message="The catalog did not return its namespaces." />}
-              {namespaceItems.length === 0 && !namespaces.isPending && <p className={ui.muted}>No namespaces were found in this catalog.</p>}
+              {namespaceItems.length === 0 && !namespaces.isPending && !namespaces.isError && <p className={ui.muted}>No namespaces were found in this catalog.</p>}
               <div className={ui.namespaceGrid}>
                 {namespaceItems.map((item) => (
                   <Button variant="ghost" className={ui.namespaceCard} key={namespaceKey(item.namespace)} onClick={() => setLocation(item.namespace)} type="button">
@@ -719,7 +693,7 @@ function TableDetails({
   const table = query.data.table
   return (
     <div className={ui.detailsStack}>
-      <TableWorkerJobs key={JSON.stringify([catalogId, namespace, tableName])} catalogId={catalogId} namespace={namespace} tableName={tableName} />
+      <WorkerWorkbench key={JSON.stringify([catalogId, namespace, tableName])} catalogId={catalogId} namespace={namespace} tableName={tableName} />
       <div className={ui.detailStats}>
         <Card className={ui.statCard}><span className={ui.statLabel}>Format version</span><strong className={ui.statValue}>v{table.formatVersion}</strong></Card>
         <Card className={ui.statCard}><span className={ui.statLabel}>Snapshots</span><strong className={ui.statValue}>{table.snapshotCount}</strong></Card>
@@ -795,201 +769,6 @@ function TableDetails({
         )}
       </Card>
     </div>
-  )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function displayCell(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
-
-function formatEngineName(engine: string): string {
-  return engine.split(/[/-]/).filter(Boolean).map((part) => `${part[0]!.toUpperCase()}${part.slice(1)}`).join(' ')
-}
-
-function WorkerResult({ result }: { result: Record<string, unknown> }) {
-  const fields = Array.isArray(result.schema) ? result.schema.filter(isRecord) : []
-  const rows = Array.isArray(result.rows) ? result.rows.filter(isRecord) : []
-  const namespaces = Array.isArray(result.namespaces) ? result.namespaces.filter(Array.isArray) : []
-  const columns = fields.flatMap((field) => typeof field.name === 'string' ? [field.name] : [])
-  const showsRequired = fields.some((field) => typeof field.required === 'boolean')
-
-  return (
-    <div className={ui.workerResult}>
-      <div className={ui.workerResultStats}>
-        {typeof result.formatVersion === 'number' && <Card className={ui.workerResultStat}><span className={ui.workerResultStatLabel}>Format</span><strong className={ui.workerResultStatValue}>v{result.formatVersion}</strong></Card>}
-        {typeof result.snapshotCount === 'number' && <Card className={ui.workerResultStat}><span className={ui.workerResultStatLabel}>Snapshots</span><strong className={ui.workerResultStatValue}>{result.snapshotCount}</strong></Card>}
-        {typeof result.namespaceCount === 'number' && <Card className={ui.workerResultStat}><span className={ui.workerResultStatLabel}>Namespaces</span><strong className={ui.workerResultStatValue}>{result.namespaceCount}</strong></Card>}
-        {typeof result.rowCount === 'number' && <Card className={ui.workerResultStat}><span className={ui.workerResultStatLabel}>Rows returned</span><strong className={ui.workerResultStatValue}>{result.rowCount}</strong></Card>}
-      </div>
-      {fields.length > 0 && (
-        <div className={ui.workerResultTableWrap}>
-          <Table>
-            <TableHeader><TableRow><TableHead className={ui.workerResultTh}>Field</TableHead><TableHead className={ui.workerResultTh}>Type</TableHead>{showsRequired && <TableHead className={ui.workerResultTh}>Required</TableHead>}</TableRow></TableHeader>
-            <TableBody>{fields.map((field, index) => (
-              <TableRow key={`${String(field.id ?? index)}:${String(field.name ?? '')}`}>
-                <TableCell className={ui.workerResultTd}>{typeof field.name === 'string' ? field.name : 'Field'}</TableCell>
-                <TableCell className={ui.workerResultTd}><code className={ui.workerResultCode}>{typeof field.type === 'string' ? field.type : '—'}</code></TableCell>
-                {showsRequired && <TableCell className={ui.workerResultTd}>{field.required === true ? 'Yes' : 'No'}</TableCell>}
-              </TableRow>
-            ))}</TableBody>
-          </Table>
-        </div>
-      )}
-      {rows.length > 0 && (
-        <div className={ui.workerResultTableWrap}>
-          <Table>
-            <TableHeader><TableRow>{(columns.length > 0 ? columns : Object.keys(rows[0]!)).map((column) => <TableHead className={ui.workerResultTh} key={column}>{column}</TableHead>)}</TableRow></TableHeader>
-            <TableBody>{rows.map((row, index) => (
-              <TableRow key={index}>{(columns.length > 0 ? columns : Object.keys(rows[0]!)).map((column) => (
-                <TableCell className={ui.workerResultTd} key={column}>{displayCell(row[column])}</TableCell>
-              ))}</TableRow>
-            ))}</TableBody>
-          </Table>
-        </div>
-      )}
-      {namespaces.length > 0 && (
-        <div className={ui.tagList}>
-          {namespaces.map((namespace, index) => <Badge variant="tag" className="font-mono" key={index}>{namespace.map(String).join(' / ')}</Badge>)}
-        </div>
-      )}
-      <Collapsible className={ui.workerRawResult} summary="Raw result">
-        <pre className={ui.workerRawPre}>{JSON.stringify(result, null, 2)}</pre>
-      </Collapsible>
-    </div>
-  )
-}
-
-function TableWorkerJobs({ catalogId, namespace, tableName }: { catalogId: string; namespace: string[]; tableName: string }) {
-  const workers = useQuery({ queryKey: ['workers'], queryFn: getWorkers, staleTime: 30_000 })
-  const [workerId, setWorkerId] = useState('')
-  const [rowLimit, setRowLimit] = useState(10)
-  const [jobId, setJobId] = useState('')
-  const activeWorkerId = workerId || workers.data?.[0]?.id || ''
-  const workerStatus = useQuery({
-    queryKey: ['worker-status', activeWorkerId],
-    queryFn: () => getWorkerStatus(activeWorkerId),
-    enabled: Boolean(activeWorkerId),
-    staleTime: 30_000,
-  })
-  const job = useQuery({
-    queryKey: ['worker-job', activeWorkerId, jobId],
-    queryFn: () => getWorkerJob(activeWorkerId, jobId),
-    enabled: Boolean(activeWorkerId && jobId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.job.status
-      return status === 'succeeded' || status === 'failed' ? false : 500
-    },
-    refetchIntervalInBackground: true,
-  })
-  const submit = useMutation({
-    mutationFn: (submission: WorkerJobSubmission) => submitWorkerJob(activeWorkerId, submission),
-    onSuccess: (accepted) => setJobId(accepted.jobId),
-  })
-  const operations = workerStatus.data?.worker.capabilities.operations ?? []
-  const ready = workerStatus.data?.worker.health.status === 'ready'
-  const changeWorker = (nextWorkerId: string) => {
-    setWorkerId(nextWorkerId)
-    setJobId('')
-    submit.reset()
-  }
-  const sendJob = (operation: WorkerJobSubmission['operation']) => {
-    setJobId('')
-    submit.reset()
-    if (operation === 'catalog.validate') {
-      submit.mutate({ protocolVersion: 1, operation, catalogId })
-      return
-    }
-    if (operation === 'table.inspect') {
-      submit.mutate({ protocolVersion: 1, operation, catalogId, table: { namespace, name: tableName } })
-      return
-    }
-    submit.mutate({
-      protocolVersion: 1,
-      operation,
-      catalogId,
-      table: { namespace, name: tableName },
-      options: { rowLimit },
-    })
-  }
-
-  if (workers.isPending) {
-    return <Card as="section" className={ui.workerJobCard}><Loading label="workers" /></Card>
-  }
-  if (workers.isError) {
-    return <Card as="section" className={ui.workerJobCard}><ErrorMessage message="Could not load workers." /></Card>
-  }
-  if (workers.data.length === 0) {
-    return (
-      <Card as="section" className={ui.workerJobCard}>
-        <CardHeader><p className={ui.eyebrow}>Iceberg workers</p><CardTitle>Run this table through a worker</CardTitle></CardHeader>
-        <p className={ui.muted}>Configure a worker to inspect this table and read sample rows.</p>
-        <Link className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), ui.workerConfigLink)} to="/workers">Open worker settings</Link>
-      </Card>
-    )
-  }
-
-  const selectedWorker = workers.data.find((worker) => worker.id === activeWorkerId)
-  const runtime = workerStatus.data?.worker.health.runtime
-  const engineName = runtime ? formatEngineName(runtime.engine) : 'Iceberg worker'
-  const currentJob: WorkerJob | undefined = job.data?.job
-  return (
-    <Card as="section" className={ui.workerJobCard} aria-label={`${selectedWorker?.name ?? 'Iceberg worker'} operations`}>
-      <CardHeader className={cn(ui.workerJobHeading, 'mb-0')}>
-        <div><p className={ui.eyebrow}>Powered by {engineName}</p><CardTitle>Try this table with {selectedWorker?.name ?? 'a worker'}</CardTitle></div>
-        {workers.data.length > 1 ? (
-          <div className={ui.workerSelectLabel}>
-            <NativeSelect
-              id="worker-select"
-              label="Worker"
-              size="sm"
-              options={workers.data.map((worker) => ({ value: worker.id, label: worker.name }))}
-              value={activeWorkerId}
-              onChange={(event) => changeWorker(event.target.value)}
-            />
-          </div>
-        ) : <Badge variant={ready ? 'success' : workerStatus.data ? 'destructive' : 'secondary'} className={ui.workerState}><span className={`${ui.workerStateDot} ${ready ? 'bg-[#24a786]' : workerStatus.data ? 'bg-[#c45145]' : ''}`} />{selectedWorker?.name ?? workers.data[0]!.name}</Badge>}
-      </CardHeader>
-      {workerStatus.isPending && <p className={ui.muted}>Checking worker…</p>}
-      {workerStatus.isError && <ErrorMessage message="The worker is offline. Check its URL and API credentials." />}
-      {workerStatus.data && (
-        <>
-          <div className={ui.workerJobRuntime}>
-            <span className={ui.workerLanguage}>{runtime ? `${runtime.language[0]!.toUpperCase()}${runtime.language.slice(1)} ${runtime.engineVersion}` : 'Worker runtime'}</span>
-            <span>{runtime?.version}</span>
-            <Badge variant={ready ? 'success' : 'destructive'} className={ui.workerState}><span className={`${ui.workerStateDot} ${ready ? 'bg-[#24a786]' : 'bg-[#c45145]'}`} />{workerStatus.data.worker.health.status}</Badge>
-          </div>
-          {!ready && <p className={ui.muted}>This worker is degraded. Results may not be available.</p>}
-          <div className={ui.workerJobActions}>
-            <Button variant="secondary" className={ui.workerActionButton} disabled={!ready || submit.isPending || !operations.includes('catalog.validate')} onClick={() => sendJob('catalog.validate')} type="button">Validate catalog</Button>
-            <Button variant="secondary" className={ui.workerActionButton} disabled={!ready || submit.isPending || !operations.includes('table.inspect')} onClick={() => sendJob('table.inspect')} type="button">Inspect with {runtime ? `${runtime.language[0]!.toUpperCase()}${runtime.language.slice(1)}` : 'worker'}</Button>
-            <div className={ui.workerRowLimit}>
-              <Label htmlFor="sample-row-limit">Rows</Label>
-              <Input id="sample-row-limit" className={ui.workerRowInput} aria-label="Sample row limit" max={100} min={1} onChange={(event) => setRowLimit(Number(event.target.value))} step={1} type="number" value={rowLimit} />
-            </div>
-            <Button className={ui.workerActionButton} disabled={!ready || submit.isPending || !operations.includes('table.sample') || !Number.isInteger(rowLimit) || rowLimit < 1 || rowLimit > 100} onClick={() => sendJob('table.sample')} type="button">{submit.isPending ? 'Submitting…' : 'Sample rows'}</Button>
-          </div>
-          {submit.isError && <ErrorMessage message={submit.error.message} />}
-          {job.isError && <ErrorMessage message={job.error.message} />}
-          {currentJob && (
-            <div className={ui.workerJobOutput} aria-live="polite">
-              <div className={ui.workerJobOutputHeading}>
-                <div><p className={ui.eyebrow}>Go worker result</p><span className={ui.workerJobId}>Job {currentJob.jobId}</span></div>
-                <Badge variant={currentJob.status === 'succeeded' ? 'success' : currentJob.status === 'failed' ? 'destructive' : 'secondary'}>{currentJob.status}{currentJob.progress !== undefined ? ` · ${Math.round(currentJob.progress * 100)}%` : ''}</Badge>
-              </div>
-              {currentJob.status === 'failed' && currentJob.error && <ErrorMessage message={currentJob.error.message} />}
-              {currentJob.status === 'succeeded' && currentJob.result && <WorkerResult result={currentJob.result} />}
-              {(currentJob.status === 'queued' || currentJob.status === 'running') && <p className={ui.muted}>Reading table metadata and files with Apache Iceberg Go…</p>}
-            </div>
-          )}
-        </>
-      )}
-    </Card>
   )
 }
 
