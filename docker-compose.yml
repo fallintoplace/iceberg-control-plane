@@ -1,0 +1,5 @@
+services:
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    ports:
+      - "127.0.0.1:8181:8181"
