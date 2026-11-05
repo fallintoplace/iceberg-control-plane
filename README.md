@@ -2,7 +2,7 @@
 
 An open-source control plane for browsing Apache Iceberg REST catalogs.
 
-The current build is a local catalog explorer. It shows namespaces, tables, schemas, partition specs, and recent snapshots. Catalog data stays read only. Connection settings are managed locally, while credentials stay in the API environment.
+The current build is a local catalog explorer. It shows namespaces, tables, schemas, partition specs, and recent snapshots. Catalog browsing stays read only. An optional Iceberg-Go learning lab can write only to its explicitly enabled local fixture. Connection settings are managed locally, while credentials stay in the API environment.
 
 ## Quick start
 
@@ -17,7 +17,7 @@ docker compose run --rm --entrypoint /usr/local/bin/seed-fixture iceberg-go-work
 pnpm dev
 ```
 
-Open <http://localhost:5173>, choose `analytics.events`, and click **Sample rows** in the Go worker panel. The fixture includes three sample events. **Inspect with Go** shows the table schema returned by Apache Iceberg Go.
+Open <http://localhost:5173>, choose `analytics.events`, and click **Sample rows** in the Go worker panel. The fixture includes three sample events. **Inspect with Go** shows the table schema returned by Apache Iceberg Go. The **Make your first commit** lesson appends one event and shows the new snapshot. **Reset lesson** restores the three starter events.
 
 The API binds to `127.0.0.1` by default. This first build is for one local operator. Do not expose it to a shared network.
 
@@ -55,7 +55,7 @@ Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTo
 
 ## Workers
 
-The repository includes a Go worker that uses the current Apache Iceberg Go module. It validates REST catalogs, inspects table metadata, and reads sample rows from Parquet data files. Docker Compose starts the worker at `http://localhost:8090` beside the REST fixture. The shared fixture volume lets the Go worker read the fixture's local table files.
+The repository includes a Go worker that uses the current Apache Iceberg Go module. It validates REST catalogs, inspects table metadata, and reads sample rows from Parquet data files. Docker Compose starts the worker at `http://localhost:8090` beside the REST fixture. The shared fixture volume lets the Go worker read the fixture's local table files. Compose explicitly enables the learning lab for this local fixture; the worker refuses the tutorial operations for remote catalog URLs, and both operations target only `analytics.events`.
 
 The API can also connect to separate workers written in Java, Rust, TypeScript, or another language. Set `ICEBERG_WORKERS_JSON` in the API environment. Workers implement the versioned HTTP contract in [workers/openapi.yaml](workers/openapi.yaml). They advertise read-only operations and resolve catalog credentials by catalog ID from their own environment.
 

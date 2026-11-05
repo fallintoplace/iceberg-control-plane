@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fallintoplace/iceberg-control-plane/workers/iceberg-go/fixture"
 	"github.com/google/uuid"
 )
 
@@ -71,6 +72,7 @@ type Server struct {
 	workerVersion string
 	executor      JobExecutor
 	mu            sync.RWMutex
+	tutorialMu    sync.Mutex
 	jobs          map[string]*storedJob
 	requests      map[string]string
 }
@@ -142,9 +144,16 @@ func icebergGoVersion() string {
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
+	operations := []string{"catalog.validate", "table.inspect", "table.sample"}
+	for _, profile := range s.catalogs {
+		if profile.LearningLab && fixture.IsLocalCatalogURI(profile.URI) {
+			operations = append(operations, "tutorial.append", "tutorial.reset")
+			break
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocolVersion": protocolVersion,
-		"operations":      []string{"catalog.validate", "table.inspect", "table.sample"},
+		"operations":      operations,
 	})
 }
 
@@ -187,9 +196,15 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if _, ok := s.catalogs[submission.CatalogID]; !ok {
+	profile, ok := s.catalogs[submission.CatalogID]
+	if !ok {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "Catalog is not configured on this worker."})
+		return
+	}
+	if isTutorialOperation(submission.Operation) && (!profile.LearningLab || !fixture.IsLocalCatalogURI(profile.URI)) {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "The learning lab is not enabled for this local catalog."})
 		return
 	}
 
@@ -217,7 +232,7 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 
 func supportedOperation(operation string) bool {
 	switch operation {
-	case "catalog.validate", "table.inspect", "table.sample":
+	case "catalog.validate", "table.inspect", "table.sample", "tutorial.append", "tutorial.reset":
 		return true
 	default:
 		return false
@@ -241,6 +256,10 @@ func validateSubmission(submission JobSubmission) error {
 	case "table.sample":
 		if !validTable(submission.Table) || submission.Options == nil || submission.Options.RowLimit < 1 || submission.Options.RowLimit > 100 {
 			return errors.New("invalid table sample request")
+		}
+	case "tutorial.append", "tutorial.reset":
+		if submission.Table != nil || submission.Options != nil {
+			return errors.New("learning-lab operations do not accept a table or options")
 		}
 	default:
 		return errors.New("unsupported operation")
@@ -270,6 +289,10 @@ func (s *Server) runJob(jobID string, submission JobSubmission) {
 	profile := s.catalogs[submission.CatalogID]
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if isTutorialOperation(submission.Operation) {
+		s.tutorialMu.Lock()
+		defer s.tutorialMu.Unlock()
+	}
 	result, err := s.executor(ctx, profile, submission)
 
 	s.mu.Lock()
@@ -289,6 +312,10 @@ func (s *Server) runJob(jobID string, submission JobSubmission) {
 	job.status.Status = "succeeded"
 	job.status.Progress = 1
 	job.status.Result = result
+}
+
+func isTutorialOperation(operation string) bool {
+	return operation == "tutorial.append" || operation == "tutorial.reset"
 }
 
 func safeErrorKind(err error) string {

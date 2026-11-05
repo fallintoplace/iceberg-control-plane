@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -12,9 +13,13 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/iceberg-go/catalog/rest"
 	"github.com/apache/iceberg-go/table"
+	"github.com/fallintoplace/iceberg-control-plane/workers/iceberg-go/fixture"
 )
 
 func ExecuteIcebergJob(ctx context.Context, profile CatalogProfile, job JobSubmission) (map[string]any, error) {
+	if isTutorialOperation(job.Operation) && (!profile.LearningLab || !fixture.IsLocalCatalogURI(profile.URI)) {
+		return nil, errors.New("learning lab is not enabled for a local catalog")
+	}
 	options := make([]rest.Option, 0, 2)
 	if profile.Warehouse != "" {
 		options = append(options, rest.WithWarehouseLocation(profile.Warehouse))
@@ -54,6 +59,10 @@ func ExecuteIcebergJob(ctx context.Context, profile CatalogProfile, job JobSubmi
 			return inspectTable(profile.ID, icebergTable), nil
 		}
 		return sampleTable(ctx, icebergTable, job.Options.RowLimit)
+	case "tutorial.append":
+		return fixture.AppendLearningEvent(ctx, catalog)
+	case "tutorial.reset":
+		return fixture.ResetLearningLab(ctx, catalog)
 	default:
 		return nil, fmt.Errorf("unsupported operation")
 	}

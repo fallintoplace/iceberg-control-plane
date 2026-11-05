@@ -54,6 +54,102 @@ func TestHealthAndCapabilities(t *testing.T) {
 	}
 }
 
+func TestLearningLabOperationsRequireExplicitLocalProfile(t *testing.T) {
+	t.Run("keeps tutorial writes hidden and rejects them by default", func(t *testing.T) {
+		server := httptest.NewServer(NewServer(testCatalogs(), "", "test", nil).Handler())
+		defer server.Close()
+
+		response, err := http.Get(server.URL + "/v1/capabilities")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var capabilities struct {
+			Operations []string `json:"operations"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&capabilities); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if strings.Join(capabilities.Operations, ",") != "catalog.validate,table.inspect,table.sample" {
+			t.Fatalf("default capabilities = %v", capabilities.Operations)
+		}
+
+		submission := testSubmission(uuid.NewString(), "tutorial.append")
+		response = postSubmission(t, server.URL, submission)
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("unconfigured tutorial operation status = %d, want 422", response.StatusCode)
+		}
+	})
+
+	t.Run("advertises and accepts fixed local tutorial jobs", func(t *testing.T) {
+		started := make(chan string, 2)
+		executor := func(_ context.Context, _ CatalogProfile, submission JobSubmission) (map[string]any, error) {
+			started <- submission.Operation
+			return map[string]any{"action": submission.Operation}, nil
+		}
+		server := httptest.NewServer(NewServer(testLearningLabCatalogs(), "", "test", executor).Handler())
+		defer server.Close()
+
+		response, err := http.Get(server.URL + "/v1/capabilities")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var capabilities struct {
+			Operations []string `json:"operations"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&capabilities); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if strings.Join(capabilities.Operations, ",") != "catalog.validate,table.inspect,table.sample,tutorial.append,tutorial.reset" {
+			t.Fatalf("learning lab capabilities = %v", capabilities.Operations)
+		}
+
+		invalid := testSubmission(uuid.NewString(), "tutorial.reset")
+		invalid.Table = &TableIdentifier{Namespace: []string{"analytics"}, Name: "other"}
+		response = postSubmission(t, server.URL, invalid)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("tutorial job with caller-provided table status = %d, want 400", response.StatusCode)
+		}
+
+		for _, operation := range []string{"tutorial.append", "tutorial.reset"} {
+			submission := testSubmission(uuid.NewString(), operation)
+			accepted := decodeAccepted(t, postSubmission(t, server.URL, submission))
+			select {
+			case got := <-started:
+				if got != operation {
+					t.Fatalf("executor operation = %q, want %q", got, operation)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("executor did not run %s job %s", operation, accepted.JobID)
+			}
+		}
+	})
+
+	t.Run("does not enable remote profiles even with the flag set", func(t *testing.T) {
+		catalogs := map[string]CatalogProfile{"remote": {ID: "remote", URI: "https://catalog.example.com", LearningLab: true}}
+		server := httptest.NewServer(NewServer(catalogs, "", "test", nil).Handler())
+		defer server.Close()
+
+		response, err := http.Get(server.URL + "/v1/capabilities")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var capabilities struct {
+			Operations []string `json:"operations"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&capabilities); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if strings.Contains(strings.Join(capabilities.Operations, ","), "tutorial.") {
+			t.Fatalf("remote profile advertised tutorial writes: %v", capabilities.Operations)
+		}
+	})
+}
+
 func TestWorkerAuthorization(t *testing.T) {
 	server := httptest.NewServer(NewServer(testCatalogs(), "worker-secret", "test", nil).Handler())
 	defer server.Close()
@@ -230,6 +326,10 @@ func TestRejectsUnknownFieldsAndOversizedBodies(t *testing.T) {
 
 func testCatalogs() map[string]CatalogProfile {
 	return map[string]CatalogProfile{"local": {ID: "local", URI: "http://localhost:8181"}}
+}
+
+func testLearningLabCatalogs() map[string]CatalogProfile {
+	return map[string]CatalogProfile{"local": {ID: "local", URI: "http://iceberg-rest:8181", LearningLab: true}}
 }
 
 func testSubmission(requestID, operation string) JobSubmission {

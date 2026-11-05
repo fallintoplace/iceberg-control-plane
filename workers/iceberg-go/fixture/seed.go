@@ -3,8 +3,6 @@ package fixture
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -17,12 +15,7 @@ import (
 const fixtureTable = "analytics.events"
 
 func Seed(ctx context.Context, uri string) (bool, error) {
-	parsed, err := url.Parse(uri)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-		return false, fmt.Errorf("fixture URI must be a valid HTTP or HTTPS URL")
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if host != "localhost" && host != "127.0.0.1" && host != "::1" && host != "iceberg-rest" {
+	if !IsLocalCatalogURI(uri) {
 		return false, fmt.Errorf("fixture seeding is limited to localhost and the local Docker fixture")
 	}
 

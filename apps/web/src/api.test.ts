@@ -153,4 +153,27 @@ describe('catalog API client', () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/workers/iceberg%2Fgo/jobs/job%2F1')
     expect(response.job.progress).toBe(0.5)
   })
+
+  it('submits fixed-target learning lab jobs without table or row input', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      protocolVersion: 1,
+      jobId: 'lesson-1',
+      status: 'queued',
+    }), { status: 202, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await submitWorkerJob('iceberg-go', {
+      protocolVersion: 1,
+      operation: 'tutorial.append',
+      catalogId: 'local',
+    })
+
+    const call = fetchMock.mock.calls[0]
+    if (!call) throw new Error('Learning lab submission request was not sent.')
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      protocolVersion: 1,
+      operation: 'tutorial.append',
+      catalogId: 'local',
+    })
+  })
 })

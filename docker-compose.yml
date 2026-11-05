@@ -13,7 +13,7 @@ services:
       iceberg-rest:
         condition: service_healthy
     environment:
-      ICEBERG_GO_CATALOGS_JSON: '[{"id":"local","uri":"http://iceberg-rest:8181"}]'
+      ICEBERG_GO_CATALOGS_JSON: '[{"id":"local","uri":"http://iceberg-rest:8181","learningLab":true}]'
       ICEBERG_GO_WORKER_TOKEN: "${ICEBERG_GO_WORKER_TOKEN:-}"
       ICEBERG_GO_WORKER_VERSION: "0.1.0"
     ports:

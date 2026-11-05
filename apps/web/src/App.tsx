@@ -493,7 +493,7 @@ function CatalogExplorer() {
           <span>Iceberg <strong>Control Plane</strong></span>
         </Link>
         <div className={ui.topbarRight}>
-          <Badge variant="outline" size="sm" className="max-[640px]:hidden"><span className={ui.statusDot} />Read only</Badge>
+          <Badge variant="outline" size="sm" className="max-[640px]:hidden"><span className={ui.statusDot} />Read-only browsing</Badge>
           <Link className={ui.topbarLink} to="/workers">Workers</Link>
           <Link className={ui.topbarLink} to="/settings">Manage catalogs</Link>
           <span className={ui.topbarCaption}>Catalog operations</span>
@@ -660,7 +660,7 @@ function CatalogExplorer() {
               )}
             </Card>
           )}
-          <footer className={ui.pageFooter}>Read-only catalog browsing · Iceberg REST API</footer>
+          <footer className={ui.pageFooter}>Catalog browsing is read-only · lesson writes are limited to the local fixture</footer>
         </main>
       </div>
     </div>
@@ -693,7 +693,15 @@ function TableDetails({
   const table = query.data.table
   return (
     <div className={ui.detailsStack}>
-      <WorkerWorkbench key={JSON.stringify([catalogId, namespace, tableName])} catalogId={catalogId} namespace={namespace} tableName={tableName} />
+      <WorkerWorkbench
+        key={JSON.stringify([catalogId, namespace, tableName])}
+        catalogId={catalogId}
+        namespace={namespace}
+        tableName={tableName}
+        currentSnapshotId={table.currentSnapshotId}
+        snapshotCount={table.snapshotCount}
+        onTableUpdated={query.refetch}
+      />
       <div className={ui.detailStats}>
         <Card className={ui.statCard}><span className={ui.statLabel}>Format version</span><strong className={ui.statValue}>v{table.formatVersion}</strong></Card>
         <Card className={ui.statCard}><span className={ui.statLabel}>Snapshots</span><strong className={ui.statValue}>{table.snapshotCount}</strong></Card>

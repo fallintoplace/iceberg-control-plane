@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowRight, Boxes, Check, CircleAlert, Clock3, Compass, Database, LoaderCircle, Play, Rows3, Table2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowDown, ArrowRight, Boxes, Check, CircleAlert, Clock3, Compass, Database, LoaderCircle, Play, Rows3, Sparkles, Table2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useState } from 'react'
 import { Link } from 'react-router'
 import {
   getWorkerJob,
@@ -22,7 +22,8 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { WorkerResult } from './worker-result'
 import { cn } from '@/lib/utils'
 
-type IcebergOperation = WorkerJobSubmission['operation']
+type IcebergOperation = Extract<WorkerJobSubmission, { operation: 'catalog.validate' | 'table.inspect' | 'table.sample' }>['operation']
+type WorkerOperation = WorkerJobSubmission['operation']
 
 interface ExampleDefinition {
   operation: IcebergOperation
@@ -68,13 +69,19 @@ function formatLanguageName(language: string): string {
   return `${language[0]!.toUpperCase()}${language.slice(1)}`
 }
 
-function resultTitle(operation: IcebergOperation | null): string {
+function resultTitle(operation: WorkerOperation | null): string {
   switch (operation) {
     case 'catalog.validate': return 'Catalog namespaces'
     case 'table.inspect': return 'Table metadata'
     case 'table.sample': return 'Sample rows'
+    case 'tutorial.append': return 'Your first commit'
+    case 'tutorial.reset': return 'Lesson reset'
     default: return 'Worker result'
   }
+}
+
+function isLessonOperation(operation: WorkerOperation | null): operation is 'tutorial.append' | 'tutorial.reset' {
+  return operation === 'tutorial.append' || operation === 'tutorial.reset'
 }
 
 function ExampleCard({
@@ -143,12 +150,27 @@ function ExampleCard({
   )
 }
 
-export function WorkerWorkbench({ catalogId, namespace, tableName }: { catalogId: string; namespace: string[]; tableName: string }) {
+export function WorkerWorkbench({
+  catalogId,
+  namespace,
+  tableName,
+  currentSnapshotId,
+  snapshotCount,
+  onTableUpdated,
+}: {
+  catalogId: string
+  namespace: string[]
+  tableName: string
+  currentSnapshotId?: number
+  snapshotCount: number
+  onTableUpdated: () => Promise<unknown>
+}) {
   const workers = useQuery({ queryKey: ['workers'], queryFn: getWorkers, staleTime: 30_000 })
   const [workerId, setWorkerId] = useState('')
   const [rowLimit, setRowLimit] = useState(10)
   const [jobId, setJobId] = useState('')
-  const [activeOperation, setActiveOperation] = useState<IcebergOperation | null>(null)
+  const [activeOperation, setActiveOperation] = useState<WorkerOperation | null>(null)
+  const refreshedLessonJobId = useRef('')
   const activeWorkerId = workerId || workers.data?.[0]?.id || ''
   const workerStatus = useQuery({
     queryKey: ['worker-status', activeWorkerId],
@@ -178,6 +200,9 @@ export function WorkerWorkbench({ catalogId, namespace, tableName }: { catalogId
   const selectedWorker = workers.data?.find((worker) => worker.id === activeWorkerId)
   const runtime = workerStatus.data?.worker.health.runtime
   const isGoWorker = runtime?.language === 'go'
+  const isLocalLessonTable = catalogId === 'local' && namespace.length === 1 && namespace[0] === 'analytics' && tableName === 'events'
+  const supportsLesson = operations.includes('tutorial.append') && operations.includes('tutorial.reset')
+  const showLesson = isGoWorker && isLocalLessonTable && supportsLesson
 
   const changeWorker = (nextWorkerId: string) => {
     setWorkerId(nextWorkerId)
@@ -186,7 +211,7 @@ export function WorkerWorkbench({ catalogId, namespace, tableName }: { catalogId
     submit.reset()
   }
 
-  const sendJob = (operation: IcebergOperation) => {
+  const sendJob = (operation: WorkerOperation) => {
     setActiveOperation(operation)
     setJobId('')
     submit.reset()
@@ -194,9 +219,21 @@ export function WorkerWorkbench({ catalogId, namespace, tableName }: { catalogId
       ? { protocolVersion: 1, operation, catalogId }
       : operation === 'table.inspect'
         ? { protocolVersion: 1, operation, catalogId, table: { namespace, name: tableName } }
-        : { protocolVersion: 1, operation, catalogId, table: { namespace, name: tableName }, options: { rowLimit } }
+        : operation === 'table.sample'
+          ? { protocolVersion: 1, operation, catalogId, table: { namespace, name: tableName }, options: { rowLimit } }
+          : { protocolVersion: 1, operation, catalogId }
     submit.mutate(submission)
   }
+
+  useEffect(() => {
+    if (
+      !isLessonOperation(activeOperation) ||
+      currentJob?.status !== 'succeeded' ||
+      refreshedLessonJobId.current === currentJob.jobId
+    ) return
+    refreshedLessonJobId.current = currentJob.jobId
+    void onTableUpdated()
+  }, [activeOperation, currentJob, onTableUpdated])
 
   if (workers.isPending) {
     return <Card as="section" className="mb-4"><p className="text-xs text-muted">Loading Iceberg workers…</p></Card>
@@ -279,6 +316,50 @@ export function WorkerWorkbench({ catalogId, namespace, tableName }: { catalogId
             )
           })}
         </div>
+
+        {showLesson && (
+          <Card as="section" aria-label="Iceberg commit lesson" className="grid gap-4 border-[#cde3d8] bg-[linear-gradient(135deg,#f5fbf8_0%,#ffffff_75%)] p-5 shadow-none max-[640px]:p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="grid gap-2">
+                <Badge variant="success" size="xs" className="w-fit gap-1.5 tracking-[.07em]"><Sparkles aria-hidden="true" size={12} /> ICEBERG 101 · COMMITS</Badge>
+                <div className="grid gap-1">
+                  <h3 className="text-base font-semibold tracking-[-0.02em] text-ink">Make your first commit</h3>
+                  <p className="max-w-[650px] text-xs leading-relaxed text-muted">An Iceberg append writes a data file, then commits new metadata that points to a new snapshot. The previous snapshot stays available.</p>
+                </div>
+              </div>
+              <Badge variant="outline" size="sm"><Database aria-hidden="true" size={12} /> Local fixture only</Badge>
+            </div>
+
+            <div className="grid gap-3 rounded-lg border border-[#e2eee8] bg-white p-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <div className="grid gap-1">
+                <span className="text-[9px] font-bold tracking-[.08em] text-[#879597] uppercase">Before</span>
+                <code className="font-mono text-[10px] text-[#536d67]">{snapshotCount} snapshots · {currentSnapshotId ?? 'no current snapshot'}</code>
+              </div>
+              <ArrowDown aria-hidden="true" className="mx-auto rotate-[-90deg] text-brand sm:rotate-0" size={16} />
+              <div className="grid gap-1">
+                <span className="text-[9px] font-bold tracking-[.08em] text-[#879597] uppercase">After append</span>
+                <code className="font-mono text-[10px] text-[#536d67]">new metadata · new snapshot</code>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <div className="grid gap-1.5">
+                <span className="text-[9px] font-bold tracking-[.08em] text-[#879597] uppercase">Apache Iceberg Go</span>
+                <code className="overflow-x-auto rounded-md bg-[#1d302f] px-3 py-2.5 font-mono text-[10px] text-[#dce9e4]">updated, err := icebergTable.AppendTable(ctx, records, 128, nil)</code>
+                <p className="text-[10px] leading-relaxed text-[#7b898d]">This lesson writes only to the local <code className="font-mono">analytics.events</code> fixture. Reset replaces that fixture table with its three starter events.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button disabled={!ready || isRunning || submit.isPending} onClick={() => sendJob('tutorial.append')} type="button">
+                  {activeOperation === 'tutorial.append' && (isRunning || submit.isPending)
+                    ? <LoaderCircle aria-hidden="true" className="animate-spin" size={14} />
+                    : <Play aria-hidden="true" size={13} />}
+                  Append one event
+                </Button>
+                <Button variant="outline" disabled={!ready || isRunning || submit.isPending} onClick={() => sendJob('tutorial.reset')} type="button">Reset lesson</Button>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {submit.isError && <Alert variant="destructive">{submit.error.message}</Alert>}
         {job.isError && <Alert variant="destructive">{job.error.message}</Alert>}

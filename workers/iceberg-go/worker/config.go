@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+
+	"github.com/fallintoplace/iceberg-control-plane/workers/iceberg-go/fixture"
 )
 
 var (
@@ -20,15 +22,17 @@ type catalogConfigJSON struct {
 	URI            string `json:"uri"`
 	Warehouse      string `json:"warehouse,omitempty"`
 	BearerTokenEnv string `json:"bearerTokenEnv,omitempty"`
+	LearningLab    bool   `json:"learningLab,omitempty"`
 }
 
 // CatalogProfile is worker-local connection information. It is never returned
 // by the worker API or sent by the control plane.
 type CatalogProfile struct {
-	ID        string `json:"-"`
-	URI       string `json:"-"`
-	Warehouse string `json:"-"`
-	Token     string `json:"-"`
+	ID          string `json:"-"`
+	URI         string `json:"-"`
+	Warehouse   string `json:"-"`
+	Token       string `json:"-"`
+	LearningLab bool   `json:"-"`
 }
 
 func ParseCatalogProfiles(raw string, environment func(string) string) (map[string]CatalogProfile, error) {
@@ -64,11 +68,14 @@ func ParseCatalogProfiles(raw string, environment func(string) string) (map[stri
 			parsedURI.User != nil || parsedURI.RawQuery != "" || parsedURI.ForceQuery || parsedURI.Fragment != "" {
 			return nil, fmt.Errorf("catalog %q must have an HTTP or HTTPS URI without credentials, query, or fragment", entry.ID)
 		}
+		if entry.LearningLab && !fixture.IsLocalCatalogURI(entry.URI) {
+			return nil, fmt.Errorf("catalog %q learning lab requires a local fixture URI", entry.ID)
+		}
 		if entry.BearerTokenEnv != "" && !envNamePattern.MatchString(entry.BearerTokenEnv) {
 			return nil, fmt.Errorf("catalog %q has an invalid bearerTokenEnv name", entry.ID)
 		}
 
-		profile := CatalogProfile{ID: entry.ID, URI: entry.URI, Warehouse: entry.Warehouse}
+		profile := CatalogProfile{ID: entry.ID, URI: entry.URI, Warehouse: entry.Warehouse, LearningLab: entry.LearningLab}
 		if entry.BearerTokenEnv != "" {
 			profile.Token = environment(entry.BearerTokenEnv)
 			if profile.Token == "" {

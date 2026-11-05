@@ -28,6 +28,67 @@ function ResultMetric({ label, value }: { label: string; value: string }) {
   )
 }
 
+function LearningCommitResult({ result }: { result: JsonRecord }) {
+  if (result.action === 'reset') {
+    return (
+      <Card className="grid gap-2 border-[#dcebe3] bg-[#f8fcfa] p-4 shadow-none">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-[#294047]">Starter table restored</h3>
+          {typeof result.starterRowCount === 'number' && <Badge variant="success" size="xs">{result.starterRowCount} starter rows</Badge>}
+        </div>
+        <p className="text-xs leading-relaxed text-muted">{typeof result.message === 'string' ? result.message : 'The learning table was reset.'}</p>
+        {isRecord(result.currentSnapshot) && typeof result.currentSnapshot.snapshotId === 'number' && (
+          <code className="font-mono text-[10px] text-[#536d67]">Starting snapshot {result.currentSnapshot.snapshotId}</code>
+        )}
+      </Card>
+    )
+  }
+
+  if (result.action !== 'append') return null
+  const appendedRow = isRecord(result.appendedRow) ? result.appendedRow : undefined
+  const beforeSnapshotId = typeof result.beforeSnapshotId === 'number' ? result.beforeSnapshotId : undefined
+  const afterSnapshotId = typeof result.afterSnapshotId === 'number' ? result.afterSnapshotId : undefined
+  const rowFields = appendedRow ? Object.entries(appendedRow) : []
+
+  return (
+    <Card className="grid gap-4 border-[#dcebe3] bg-[#f8fcfa] p-4 shadow-none">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="grid gap-1">
+          <h3 className="text-xs font-semibold text-[#294047]">A new snapshot committed the row</h3>
+          <p className="text-[11px] leading-relaxed text-muted">Iceberg keeps the previous snapshot and points the table at the new one.</p>
+        </div>
+        {typeof result.snapshotCountAfter === 'number' && <Badge variant="success" size="xs">{result.snapshotCountAfter} snapshots</Badge>}
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+        <Card className="grid gap-1 rounded-md border-[#e5eeea] p-3 shadow-none">
+          <span className="text-[9px] font-bold tracking-[.08em] text-[#859195] uppercase">Previous snapshot</span>
+          <code className="overflow-hidden font-mono text-[10px] text-[#536d67] text-ellipsis">{beforeSnapshotId ?? 'None'}</code>
+          {typeof result.snapshotCountBefore === 'number' && <span className="text-[9px] text-muted">{result.snapshotCountBefore} total</span>}
+        </Card>
+        <span aria-label="new snapshot follows" className="mx-auto text-brand" role="img">→</span>
+        <Card className="grid gap-1 rounded-md border-[#b9d9cb] bg-white p-3 shadow-none">
+          <span className="text-[9px] font-bold tracking-[.08em] text-brand uppercase">New current snapshot</span>
+          <code className="overflow-hidden font-mono text-[10px] text-[#34504a] text-ellipsis">{afterSnapshotId ?? 'Unknown'}</code>
+          {typeof result.snapshotCountAfter === 'number' && <span className="text-[9px] text-muted">{result.snapshotCountAfter} total</span>}
+        </Card>
+      </div>
+
+      {rowFields.length > 0 && (
+        <section className="grid gap-2">
+          <h4 className="text-[10px] font-semibold text-[#536d67]">Row added by this commit</h4>
+          <div className="overflow-x-auto rounded-md border border-[#edf1f0]">
+            <Table>
+              <TableHeader><TableRow>{rowFields.map(([name]) => <TableHead className="bg-white px-[10px] py-2" key={name}>{name}</TableHead>)}</TableRow></TableHeader>
+              <TableBody><TableRow>{rowFields.map(([name, value]) => <TableCell className="max-w-[260px] overflow-hidden px-[10px] py-2 font-mono text-ellipsis whitespace-nowrap" key={name}>{displayCell(value)}</TableCell>)}</TableRow></TableBody>
+            </Table>
+          </div>
+        </section>
+      )}
+    </Card>
+  )
+}
+
 function WorkerSchema({ fields, implementation }: { fields: JsonRecord[]; implementation?: string }) {
   const showsRequired = fields.some((field) => typeof field.required === 'boolean')
 
@@ -114,13 +175,14 @@ export function WorkerResult({ result, implementation }: { result: JsonRecord; i
   const hasNamespaces = Array.isArray(result.namespaces)
   const partitionFields = Array.isArray(result.partitionFields) ? result.partitionFields.filter(isRecord) : []
   const snapshot = isRecord(result.currentSnapshot) ? result.currentSnapshot : undefined
+  const isLessonResult = result.action === 'append' || result.action === 'reset'
   const metrics = [
     ...(typeof result.formatVersion === 'number' ? [{ label: 'Format version', value: `v${result.formatVersion}` }] : []),
     ...(typeof result.snapshotCount === 'number' ? [{ label: 'Snapshots', value: String(result.snapshotCount) }] : []),
     ...(typeof result.namespaceCount === 'number' ? [{ label: 'Namespaces', value: String(result.namespaceCount) }] : []),
     ...(typeof result.rowCount === 'number' ? [{ label: 'Rows returned', value: String(result.rowCount) }] : []),
   ]
-  const hasDetails = metrics.length > 0 || schema.length > 0 || hasRows || hasNamespaces || partitionFields.length > 0 || Boolean(snapshot) || typeof result.location === 'string'
+  const hasDetails = metrics.length > 0 || schema.length > 0 || hasRows || hasNamespaces || partitionFields.length > 0 || Boolean(snapshot) || typeof result.location === 'string' || isLessonResult
 
   return (
     <div className="grid gap-5">
@@ -129,6 +191,8 @@ export function WorkerResult({ result, implementation }: { result: JsonRecord; i
           {metrics.map((metric) => <ResultMetric key={metric.label} {...metric} />)}
         </div>
       )}
+
+      {isLessonResult && <LearningCommitResult result={result} />}
 
       {(partitionFields.length > 0 || snapshot || typeof result.location === 'string') && (
         <div className="grid gap-3 sm:grid-cols-2">

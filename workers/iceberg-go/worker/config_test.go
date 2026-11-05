@@ -8,7 +8,7 @@ import (
 
 func TestParseCatalogProfiles(t *testing.T) {
 	t.Run("loads worker-local catalog settings", func(t *testing.T) {
-		profiles, err := ParseCatalogProfiles(`[{"id":"local","uri":"http://iceberg-rest:8181","warehouse":"warehouse","bearerTokenEnv":"ICEBERG_LOCAL_TOKEN"}]`, func(name string) string {
+		profiles, err := ParseCatalogProfiles(`[{"id":"local","uri":"http://iceberg-rest:8181","warehouse":"warehouse","bearerTokenEnv":"ICEBERG_LOCAL_TOKEN","learningLab":true}]`, func(name string) string {
 			if name == "ICEBERG_LOCAL_TOKEN" {
 				return "private-token"
 			}
@@ -18,7 +18,7 @@ func TestParseCatalogProfiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		profile := profiles["local"]
-		if profile.URI != "http://iceberg-rest:8181" || profile.Warehouse != "warehouse" || profile.Token != "private-token" {
+		if profile.URI != "http://iceberg-rest:8181" || profile.Warehouse != "warehouse" || profile.Token != "private-token" || !profile.LearningLab {
 			t.Fatalf("unexpected profile values: %#v", profile)
 		}
 		encoded, err := json.Marshal(profile)
@@ -47,6 +47,7 @@ func TestParseCatalogProfiles(t *testing.T) {
 		{name: "query string", input: `[{"id":"local","uri":"http://localhost?token=private-token"}]`},
 		{name: "empty query string", input: `[{"id":"local","uri":"http://localhost?"}]`},
 		{name: "fragment", input: `[{"id":"local","uri":"http://localhost#private-token"}]`},
+		{name: "learning lab on remote catalog", input: `[{"id":"local","uri":"https://catalog.example.com","learningLab":true}]`},
 		{name: "missing token", input: `[{"id":"local","uri":"http://localhost","bearerTokenEnv":"ICEBERG_LOCAL_TOKEN"}]`},
 		{name: "invalid token environment variable", input: `[{"id":"local","uri":"http://localhost","bearerTokenEnv":"token"}]`},
 	}
