@@ -2,7 +2,7 @@
 
 An open-source control plane for browsing Apache Iceberg REST catalogs.
 
-The current build is a local, read-only catalog explorer. It shows namespaces, tables, schemas, partition specs, and recent snapshots. Catalog credentials are read by the API from the server environment and are not sent to the browser.
+The current build is a local catalog explorer. It shows namespaces, tables, schemas, partition specs, and recent snapshots. Catalog data stays read only. Connection settings are managed locally, while credentials stay in the API environment.
 
 ## Quick start
 
@@ -20,9 +20,11 @@ Open <http://localhost:5173>. The seed command adds an `analytics.events` table 
 
 The API binds to `127.0.0.1` by default. This first build is for one local operator. Do not expose it to a shared network.
 
-## Configure catalogs
+## Manage catalogs
 
-Set `ICEBERG_CATALOGS_JSON` in `.env` or the API environment:
+Open **Manage catalogs** in the app to add or remove REST catalog connections. The API stores connection definitions in `.local/catalogs.json` with owner-only file permissions. `ICEBERG_CATALOGS_FILE` can set a different path, relative to the repository root or absolute.
+
+When the saved file does not exist, the API bootstraps its first catalog list from `ICEBERG_CATALOGS_JSON` in `.env` or the API environment:
 
 ```json
 [
@@ -34,7 +36,7 @@ Set `ICEBERG_CATALOGS_JSON` in `.env` or the API environment:
 ]
 ```
 
-For a catalog that needs a bearer token, put the **environment variable name** in the catalog entry. Keep the token itself in the API process environment:
+For a catalog that needs a bearer token, put the **environment variable name** in the catalog entry or settings form. Add the token itself to the API process environment and restart the API before saving the connection:
 
 ```json
 [
@@ -48,12 +50,14 @@ For a catalog that needs a bearer token, put the **environment variable name** i
 ]
 ```
 
-Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTokenEnv`. The current version supports no authentication or bearer tokens. It rejects catalog URLs containing embedded credentials.
+Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTokenEnv`. The app supports unauthenticated and bearer-token REST catalogs. It rejects catalog URLs containing embedded credentials.
 
 ## API
 
 - `GET /api/health`
 - `GET /api/catalogs`
+- `POST /api/catalogs`
+- `DELETE /api/catalogs/{id}`
 - `GET /api/catalogs/{id}/status`
 - `GET /api/catalogs/{id}/namespaces`
 - `GET /api/catalogs/{id}/tables?namespace=...`

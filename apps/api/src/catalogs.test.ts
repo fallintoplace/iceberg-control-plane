@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { CatalogRegistry, parseCatalogDefinitions } from './catalogs.js'
+import { describe, expect, it, vi } from 'vitest'
+import { CatalogRegistry, parseCatalogDefinitions, type CatalogDefinition } from './catalogs.js'
 
 describe('parseCatalogDefinitions', () => {
   it('returns an empty list when no catalogs are configured', () => {
@@ -55,5 +55,57 @@ describe('CatalogRegistry', () => {
 
     expect(JSON.stringify(registry.list())).not.toContain('private-token')
     expect(registry.list()).toEqual([{ id: 'secure', name: 'Secure catalog' }])
+  })
+
+  it('serializes concurrent catalog changes before persisting them', async () => {
+    const first: CatalogDefinition = { id: 'first', name: 'First', uri: 'https://first.example.com' }
+    const second: CatalogDefinition = { id: 'second', name: 'Second', uri: 'https://second.example.com' }
+    const persisted: string[][] = []
+    const persist = vi.fn(async (definitions: CatalogDefinition[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      persisted.push(definitions.map((definition) => definition.id))
+    })
+    const registry = new CatalogRegistry([], {}, undefined, persist)
+
+    await Promise.all([registry.add(first), registry.add(second)])
+
+    expect(registry.list()).toEqual([
+      { id: 'first', name: 'First' },
+      { id: 'second', name: 'Second' },
+    ])
+    expect(persisted).toEqual([['first'], ['first', 'second']])
+  })
+
+  it('does not publish a catalog when persistence fails', async () => {
+    const definition: CatalogDefinition = { id: 'failed', name: 'Failed', uri: 'https://failed.example.com' }
+    const registry = new CatalogRegistry([], {}, undefined, async () => {
+      throw new Error('disk failure')
+    })
+
+    await expect(registry.add(definition)).rejects.toThrow('disk failure')
+    expect(registry.list()).toEqual([])
+  })
+
+  it('persists only one catalog when duplicate adds race', async () => {
+    const definition: CatalogDefinition = { id: 'same', name: 'Same', uri: 'https://same.example.com' }
+    const persist = vi.fn().mockResolvedValue(undefined)
+    const registry = new CatalogRegistry([], {}, undefined, persist)
+
+    const results = await Promise.allSettled([registry.add(definition), registry.add(definition)])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(registry.list()).toEqual([{ id: 'same', name: 'Same' }])
+  })
+
+  it('does not remove a catalog when persistence fails', async () => {
+    const definition = { id: 'local', name: 'Local', uri: 'https://local.example.com' }
+    const registry = new CatalogRegistry([definition], {}, undefined, async () => {
+      throw new Error('disk failure')
+    })
+
+    await expect(registry.remove('local')).rejects.toThrow('disk failure')
+    expect(registry.list()).toEqual([{ id: 'local', name: 'Local' }])
   })
 })

@@ -1,6 +1,9 @@
-import { useInfiniteQuery, useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router'
 import {
+  createCatalog,
+  deleteCatalog,
   getCatalogStatus,
   getCatalogs,
   getNamespaces,
@@ -35,10 +38,146 @@ function EmptyCatalogs() {
       <div className="empty-icon" aria-hidden="true">◇</div>
       <p className="eyebrow">No catalogs configured</p>
       <h1>Connect a REST catalog to get started</h1>
-      <p>Catalog connections are configured on the server. Add one to <code>ICEBERG_CATALOGS_JSON</code> and restart the API.</p>
-      <pre>{`[{"id":"local","name":"Local catalog","uri":"http://localhost:8181"}]`}</pre>
+      <p>Connect a REST catalog to browse its namespaces, tables, and table metadata.</p>
+      <Link className="primary-button" to="/settings">Add a catalog</Link>
       <a href="https://iceberg.apache.org/rest-catalog-spec/" target="_blank" rel="noreferrer">Read the Iceberg REST Catalog spec ↗</a>
     </main>
+  )
+}
+
+interface CatalogForm {
+  id: string
+  name: string
+  uri: string
+  warehouse: string
+  bearerTokenEnv: string
+}
+
+const emptyCatalogForm: CatalogForm = {
+  id: '',
+  name: '',
+  uri: '',
+  warehouse: '',
+  bearerTokenEnv: '',
+}
+
+function CatalogSettings() {
+  const queryClient = useQueryClient()
+  const catalogs = useQuery({ queryKey: ['catalogs'], queryFn: getCatalogs })
+  const [form, setForm] = useState(emptyCatalogForm)
+  const [saved, setSaved] = useState(false)
+  const addCatalog = useMutation({
+    mutationFn: createCatalog,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['catalogs'] })
+      setForm(emptyCatalogForm)
+      setSaved(true)
+    },
+  })
+  const removeCatalog = useMutation({
+    mutationFn: deleteCatalog,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalogs'] }),
+  })
+
+  const updateField = (field: keyof CatalogForm, value: string) => {
+    setSaved(false)
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaved(false)
+    const input = {
+      id: form.id,
+      name: form.name,
+      uri: form.uri,
+      ...(form.warehouse.trim() ? { warehouse: form.warehouse.trim() } : {}),
+      ...(form.bearerTokenEnv.trim() ? { bearerTokenEnv: form.bearerTokenEnv.trim() } : {}),
+    }
+    addCatalog.mutate(input)
+  }
+
+  return (
+    <div className="settings-page">
+      <header className="topbar">
+        <Link className="brand" to="/" aria-label="Iceberg Control Plane home">
+          <span className="brand-mark" aria-hidden="true"><span /></span>
+          <span>Iceberg <strong>Control Plane</strong></span>
+        </Link>
+        <Link className="back-button" to="/">Back to explorer</Link>
+      </header>
+      <main className="settings-content">
+        <div className="page-heading">
+          <div><p className="eyebrow">Configuration</p><h1>Catalog connections</h1></div>
+          <span className="read-only-badge"><span />Catalog data stays read only</span>
+        </div>
+
+        <section className="section-card">
+          <div className="content-title"><p className="eyebrow">New connection</p><h2>Add an Iceberg REST catalog</h2></div>
+          <form className="catalog-form" onSubmit={handleSubmit}>
+            <label>
+              <span className="field-label">Catalog ID</span>
+              <input autoComplete="off" maxLength={64} onChange={(event) => updateField('id', event.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" required value={form.id} />
+              <small>Use letters, numbers, hyphens, or underscores.</small>
+            </label>
+            <label>
+              <span className="field-label">Display name</span>
+              <input maxLength={100} onChange={(event) => updateField('name', event.target.value)} required value={form.name} />
+            </label>
+            <label className="form-wide">
+              <span className="field-label">REST catalog URL</span>
+              <input autoComplete="url" onChange={(event) => updateField('uri', event.target.value)} placeholder="https://catalog.example.com" required type="url" value={form.uri} />
+            </label>
+            <label>
+              <span className="field-label">Warehouse <span className="optional-label">Optional</span></span>
+              <input autoComplete="off" onChange={(event) => updateField('warehouse', event.target.value)} value={form.warehouse} />
+            </label>
+            <label>
+              <span className="field-label">Bearer token environment variable <span className="optional-label">Optional</span></span>
+              <input autoComplete="off" onChange={(event) => updateField('bearerTokenEnv', event.target.value)} placeholder="ICEBERG_PRODUCTION_TOKEN" value={form.bearerTokenEnv} />
+              <small>Add the token to the API environment and restart it before saving. The token itself is never sent to this form.</small>
+            </label>
+            <div className="form-actions">
+              <button className="primary-button" disabled={addCatalog.isPending} type="submit">
+                {addCatalog.isPending ? 'Saving…' : 'Save catalog'}
+              </button>
+              {saved && <span className="success-message" role="status">Catalog saved.</span>}
+            </div>
+            {addCatalog.isError && <ErrorMessage message={addCatalog.error.message} />}
+          </form>
+        </section>
+
+        <section className="section-card">
+          <div className="section-title-row content-title">
+            <div><p className="eyebrow">Saved locally</p><h2>Configured catalogs</h2></div>
+            <span className="count-pill">{catalogs.data?.length ?? 0}</span>
+          </div>
+          {catalogs.isPending && <Loading label="catalogs" />}
+          {catalogs.isError && <ErrorMessage message="Could not load configured catalogs." />}
+          {catalogs.data?.length === 0 && <p className="muted">No catalogs are configured yet.</p>}
+          {catalogs.data && catalogs.data.length > 0 && (
+            <div className="configured-catalog-list">
+              {catalogs.data.map((catalog) => (
+                <div className="configured-catalog" key={catalog.id}>
+                  <span className="catalog-initial" aria-hidden="true">{catalog.name.slice(0, 1).toUpperCase()}</span>
+                  <span className="configured-catalog-name"><strong>{catalog.name}</strong><code>{catalog.id}</code></span>
+                  <button
+                    className="remove-button"
+                    disabled={removeCatalog.isPending}
+                    onClick={() => removeCatalog.mutate(catalog.id)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {removeCatalog.isError && <ErrorMessage message={removeCatalog.error.message} />}
+        </section>
+        <p className="settings-footnote">Catalog connection settings are stored in a local file on this server. Keep this app on a trusted machine.</p>
+      </main>
+    </div>
   )
 }
 
@@ -137,6 +276,7 @@ function CatalogExplorer() {
         </Link>
         <div className="topbar-right">
           <span className="read-only-badge"><span />Read only</span>
+          <Link className="topbar-link" to="/settings">Manage catalogs</Link>
           <span className="topbar-caption">Catalog operations</span>
         </div>
       </header>
@@ -398,6 +538,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/settings" element={<CatalogSettings />} />
         <Route path="/catalog/:catalogId" element={<CatalogExplorer />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

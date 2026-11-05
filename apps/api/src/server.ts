@@ -1,11 +1,22 @@
 import Fastify from 'fastify'
-import { pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { CatalogRegistry, parseCatalogDefinitions } from './catalogs.js'
+import { FileCatalogStore } from './catalog-store.js'
 import { registerRoutes } from './routes.js'
 
-export function createServer(environment: NodeJS.ProcessEnv = process.env) {
-  const definitions = parseCatalogDefinitions(environment.ICEBERG_CATALOGS_JSON, environment)
-  const registry = new CatalogRegistry(definitions, environment)
+export async function createServer(environment: NodeJS.ProcessEnv = process.env) {
+  const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url))
+  const configPath = resolve(repositoryRoot, environment.ICEBERG_CATALOGS_FILE ?? '.local/catalogs.json')
+  const store = new FileCatalogStore(configPath)
+  const storedDefinitions = await store.load(environment)
+  const definitions = storedDefinitions ?? parseCatalogDefinitions(environment.ICEBERG_CATALOGS_JSON, environment)
+  const registry = new CatalogRegistry(
+    definitions,
+    environment,
+    undefined,
+    (nextDefinitions) => store.save(nextDefinitions),
+  )
   const app = Fastify({
     logger: {
       redact: {
@@ -15,12 +26,12 @@ export function createServer(environment: NodeJS.ProcessEnv = process.env) {
     },
   })
 
-  registerRoutes(app, registry)
+  registerRoutes(app, registry, environment)
   return app
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const app = createServer()
+  const app = await createServer()
   const port = Number(process.env.PORT ?? 3001)
   const host = process.env.API_HOST ?? '127.0.0.1'
 

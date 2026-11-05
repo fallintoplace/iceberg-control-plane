@@ -3,6 +3,14 @@ export interface Catalog {
   name: string
 }
 
+export interface CatalogConnectionInput {
+  id: string
+  name: string
+  uri: string
+  warehouse?: string
+  bearerTokenEnv?: string
+}
+
 export interface NamespaceIdentifier {
   namespace: string[]
 }
@@ -48,8 +56,13 @@ export interface TableSummary {
   refs: Record<string, { type: 'tag' | 'branch'; 'snapshot-id': number }>
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: { accept: 'application/json' } })
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = Object.fromEntries(new Headers(init.headers).entries())
+  headers.accept = 'application/json'
+  const response = await fetch(path, {
+    ...init,
+    headers,
+  })
   if (!response.ok) {
     let message = `Request failed (${response.status}).`
     try {
@@ -66,6 +79,21 @@ async function request<T>(path: string): Promise<T> {
 export async function getCatalogs(): Promise<Catalog[]> {
   const response = await request<{ catalogs: Catalog[] }>('/api/catalogs')
   return response.catalogs
+}
+
+export async function createCatalog(input: CatalogConnectionInput): Promise<Catalog> {
+  const response = await request<{ catalog: Catalog }>('/api/catalogs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return response.catalog
+}
+
+export async function deleteCatalog(catalogId: string): Promise<void> {
+  await request<{ deleted: true }>(`/api/catalogs/${encodeURIComponent(catalogId)}`, {
+    method: 'DELETE',
+  })
 }
 
 export function getCatalogStatus(catalogId: string): Promise<CatalogStatus> {

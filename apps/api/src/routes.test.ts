@@ -53,14 +53,19 @@ function makeClient(overrides: Partial<CatalogClient> = {}): CatalogClient {
   }
 }
 
-function makeApp(client: CatalogClient | null = makeClient()) {
+function makeApp(
+  client: CatalogClient | null = makeClient(),
+  persistDefinitions: (definitions: Parameters<CatalogRegistry['add']>[0][]) => Promise<void> = async () => {},
+  environment: NodeJS.ProcessEnv = {},
+) {
   const app = Fastify({ logger: false })
   const registry = new CatalogRegistry(
     client ? definitions : [],
-    {},
+    environment,
     () => client as CatalogClient,
+    persistDefinitions,
   )
-  registerRoutes(app, registry)
+  registerRoutes(app, registry, environment)
   return app
 }
 
@@ -207,5 +212,141 @@ describe('catalog routes', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ status: 'connected', endpoints: ['/v1/config'] })
     expect(response.body).not.toContain('do-not-return')
+  })
+
+  it('saves a new catalog and returns only its public fields', async () => {
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(makeClient(), persistDefinitions)
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/catalogs',
+      payload: {
+        id: 'warehouse',
+        name: 'Warehouse',
+        uri: 'https://catalog.example.com',
+        warehouse: 'analytics',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toEqual({ catalog: { id: 'warehouse', name: 'Warehouse' } })
+    expect(response.body).not.toContain('catalog.example.com')
+    expect(persistDefinitions).toHaveBeenCalledWith([
+      definitions[0],
+      { id: 'warehouse', name: 'Warehouse', uri: 'https://catalog.example.com', warehouse: 'analytics' },
+    ])
+  })
+
+  it('rejects duplicate catalog ids without changing saved config', async () => {
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(makeClient(), persistDefinitions)
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/catalogs',
+      payload: { id: 'local', name: 'Duplicate', uri: 'https://other.example.com' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toEqual({ error: 'A catalog with this id already exists.' })
+    expect(persistDefinitions).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid catalog URLs without echoing the submitted URL', async () => {
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(makeClient(), persistDefinitions)
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/catalogs',
+      payload: { id: 'private', name: 'Private', uri: 'https://catalog.example.com?token=secret-value' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.body).not.toContain('secret-value')
+    expect(persistDefinitions).not.toHaveBeenCalled()
+  })
+
+  it('keeps catalog configuration unchanged when saving an addition fails', async () => {
+    const app = makeApp(makeClient(), vi.fn().mockRejectedValue(new Error('disk failure')))
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/catalogs',
+      payload: { id: 'new', name: 'New', uri: 'https://new.example.com' },
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ error: 'Could not save catalog configuration.' })
+    expect((await app.inject({ url: '/api/catalogs' })).json()).toEqual({
+      catalogs: [{ id: 'local', name: 'Local catalog' }],
+    })
+  })
+
+  it('requires configured bearer tokens before saving a catalog', async () => {
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(makeClient(), persistDefinitions, {})
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/catalogs',
+      payload: {
+        id: 'secure',
+        name: 'Secure',
+        uri: 'https://catalog.example.com',
+        bearerTokenEnv: 'ICEBERG_SECURE_TOKEN',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'Invalid catalog configuration.' })
+    expect(persistDefinitions).not.toHaveBeenCalled()
+  })
+
+  it('removes a catalog and clears its cached client', async () => {
+    const client = makeClient()
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(client, persistDefinitions)
+    apps.push(app)
+    await app.inject({ url: '/api/catalogs/local/status' })
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/catalogs/local' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ deleted: true })
+    expect(persistDefinitions).toHaveBeenCalledWith([])
+    expect((await app.inject({ url: '/api/catalogs' })).json()).toEqual({ catalogs: [] })
+    expect((await app.inject({ url: '/api/catalogs/local/status' })).statusCode).toBe(404)
+  })
+
+  it('does not remove a catalog when saving its deletion fails', async () => {
+    const app = makeApp(makeClient(), vi.fn().mockRejectedValue(new Error('disk failure')))
+    apps.push(app)
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/catalogs/local' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ error: 'Could not save catalog configuration.' })
+    expect((await app.inject({ url: '/api/catalogs' })).json()).toEqual({
+      catalogs: [{ id: 'local', name: 'Local catalog' }],
+    })
+  })
+
+  it('returns not found when removing a missing catalog', async () => {
+    const persistDefinitions = vi.fn().mockResolvedValue(undefined)
+    const app = makeApp(makeClient(), persistDefinitions)
+    apps.push(app)
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/catalogs/missing' })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'Catalog not found.' })
+    expect(persistDefinitions).not.toHaveBeenCalled()
   })
 })
