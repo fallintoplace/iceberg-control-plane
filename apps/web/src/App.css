@@ -132,6 +132,23 @@ h2 { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.4; font-weigh
 .remove-button:hover { background: #fff7f6; }
 .remove-button:disabled { cursor: wait; opacity: .6; }
 .settings-footnote { color: #899598; font-size: 10px; line-height: 1.6; }
+.contract-link { color: var(--green-dark); font-size: 11px; font-weight: 600; text-decoration: none; }
+.contract-link:hover { text-decoration: underline; }
+.worker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.worker-card { margin: 0; }
+.worker-card-heading { display: flex; align-items: center; gap: 10px; }
+.worker-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: #7c898d; font-size: 10px; text-transform: capitalize; }
+.worker-state > span { width: 6px; height: 6px; border-radius: 50%; background: #aab4b4; }
+.worker-state.is-ready { color: var(--green-dark); }
+.worker-state.is-ready > span { background: #24a786; }
+.worker-state.is-degraded { color: #a34a41; }
+.worker-state.is-degraded > span { background: #c45145; }
+.worker-runtime { display: flex; flex-direction: column; gap: 5px; margin-top: 17px; color: #738184; font-size: 10px; }
+.worker-language { color: var(--ink); font-size: 12px; font-weight: 700; text-transform: capitalize; }
+.worker-error { margin: 15px 0 0; color: var(--red); font-size: 11px; }
+.worker-empty-state { margin-top: 28px; }
+.worker-empty-state pre { overflow-wrap: anywhere; }
+.settings-footnote code { color: #536d67; font-size: 10px; }
 
 @media (max-width: 900px) {
   .workspace { grid-template-columns: 220px minmax(0, 1fr); }
@@ -143,6 +160,8 @@ h2 { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.4; font-weigh
   .topbar { height: 58px; padding: 0 15px; }
   .topbar-caption { display: none; }
   .topbar-right { gap: 10px; }
+  .topbar-right .read-only-badge { display: none; }
+  .brand { font-size: 12px; }
   .read-only-badge { padding: 5px 7px; font-size: 10px; }
   .workspace { display: block; }
   .sidebar { padding: 14px 15px 10px; border-right: 0; border-bottom: 1px solid var(--line); }

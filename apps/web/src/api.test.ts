@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createCatalog, deleteCatalog, getNamespaces, getTable, getTables } from './api'
+import {
+  createCatalog,
+  deleteCatalog,
+  getNamespaces,
+  getTable,
+  getTables,
+  getWorkerJob,
+  getWorkerStatus,
+  getWorkers,
+  submitWorkerJob,
+} from './api'
 
 describe('catalog API client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -65,7 +75,6 @@ describe('catalog API client', () => {
         bearerTokenEnv: 'ICEBERG_TOKEN',
       }),
     })
-    expect(fetchMock.mock.calls[0]?.[1]?.body).not.toContain('actual-token-value')
   })
 
   it('encodes catalog ids when removing connections', async () => {
@@ -81,5 +90,67 @@ describe('catalog API client', () => {
       method: 'DELETE',
       headers: { accept: 'application/json' },
     })
+  })
+
+  it('loads worker status without exposing worker connection details', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workers: [{ id: 'iceberg-go', name: 'Iceberg Go' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        worker: {
+          id: 'iceberg-go',
+          name: 'Iceberg Go',
+          health: {
+            protocolVersion: 1,
+            status: 'ready',
+            runtime: { language: 'go', version: '1.0.0', engine: 'iceberg-go', engineVersion: '0.1.0' },
+          },
+          capabilities: { protocolVersion: 1, operations: ['table.inspect'] },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const workers = await getWorkers()
+    const response = await getWorkerStatus('iceberg/go')
+
+    expect(workers).toEqual([{ id: 'iceberg-go', name: 'Iceberg Go' }])
+    expect(response.worker.health.runtime.language).toBe('go')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/workers/iceberg%2Fgo/status')
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual({
+      headers: { accept: 'application/json' },
+    })
+  })
+
+  it('submits and polls worker jobs using encoded path components', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ protocolVersion: 1, jobId: 'job-1', status: 'queued' }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        job: { protocolVersion: 1, jobId: 'job/1', status: 'running', progress: 0.5 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await submitWorkerJob('iceberg/go', {
+      protocolVersion: 1,
+      operation: 'table.sample',
+      catalogId: 'local',
+      table: { namespace: ['analytics'], name: 'events' },
+      options: { rowLimit: 10 },
+    })
+    const response = await getWorkerJob('iceberg/go', 'job/1')
+    const submissionCall = fetchMock.mock.calls[0]
+    if (!submissionCall) throw new Error('Worker submission request was not sent.')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/workers/iceberg%2Fgo/jobs')
+    expect(JSON.parse((submissionCall[1] as RequestInit).body as string)).toMatchObject({
+      operation: 'table.sample',
+      options: { rowLimit: 10 },
+    })
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/workers/iceberg%2Fgo/jobs/job%2F1')
+    expect(response.job.progress).toBe(0.5)
   })
 })

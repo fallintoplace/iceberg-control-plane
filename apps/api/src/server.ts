@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { CatalogRegistry, parseCatalogDefinitions } from './catalogs.js'
 import { FileCatalogStore } from './catalog-store.js'
 import { registerRoutes } from './routes.js'
+import { parseWorkerDefinitions, WorkerRegistry } from './workers.js'
 
 export async function createServer(environment: NodeJS.ProcessEnv = process.env) {
   const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url))
@@ -17,6 +18,7 @@ export async function createServer(environment: NodeJS.ProcessEnv = process.env)
     undefined,
     (nextDefinitions) => store.save(nextDefinitions),
   )
+  const workers = new WorkerRegistry(parseWorkerDefinitions(environment.ICEBERG_WORKERS_JSON, environment), environment)
   const app = Fastify({
     logger: {
       redact: {
@@ -26,7 +28,7 @@ export async function createServer(environment: NodeJS.ProcessEnv = process.env)
     },
   })
 
-  registerRoutes(app, registry, environment)
+  registerRoutes(app, registry, environment, workers)
   return app
 }
 

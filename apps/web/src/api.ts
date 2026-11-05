@@ -11,6 +11,58 @@ export interface CatalogConnectionInput {
   bearerTokenEnv?: string
 }
 
+export interface Worker {
+  id: string
+  name: string
+}
+
+export interface WorkerHealth {
+  protocolVersion: 1
+  status: 'ready' | 'degraded'
+  runtime: {
+    language: 'go' | 'java' | 'rust' | 'typescript' | 'other'
+    version: string
+    engine: string
+    engineVersion: string
+  }
+}
+
+export interface WorkerCapabilities {
+  protocolVersion: 1
+  operations: string[]
+}
+
+export interface WorkerStatus {
+  worker: Worker & { health: WorkerHealth; capabilities: WorkerCapabilities }
+}
+
+export type WorkerJobSubmission =
+  | { protocolVersion: 1; requestId?: string; operation: 'catalog.validate'; catalogId: string }
+  | { protocolVersion: 1; requestId?: string; operation: 'table.inspect'; catalogId: string; table: TableIdentifier }
+  | {
+      protocolVersion: 1
+      requestId?: string
+      operation: 'table.sample'
+      catalogId: string
+      table: TableIdentifier
+      options: { rowLimit: number }
+    }
+
+export interface WorkerJobAccepted {
+  protocolVersion: 1
+  jobId: string
+  status: 'queued' | 'running'
+}
+
+export interface WorkerJob {
+  protocolVersion: 1
+  jobId: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  progress?: number
+  result?: Record<string, unknown>
+  error?: { code: string; message: string; retryable: boolean }
+}
+
 export interface NamespaceIdentifier {
   namespace: string[]
 }
@@ -94,6 +146,27 @@ export async function deleteCatalog(catalogId: string): Promise<void> {
   await request<{ deleted: true }>(`/api/catalogs/${encodeURIComponent(catalogId)}`, {
     method: 'DELETE',
   })
+}
+
+export async function getWorkers(): Promise<Worker[]> {
+  const response = await request<{ workers: Worker[] }>('/api/workers')
+  return response.workers
+}
+
+export function getWorkerStatus(workerId: string): Promise<WorkerStatus> {
+  return request(`/api/workers/${encodeURIComponent(workerId)}/status`)
+}
+
+export function submitWorkerJob(workerId: string, job: WorkerJobSubmission): Promise<WorkerJobAccepted> {
+  return request(`/api/workers/${encodeURIComponent(workerId)}/jobs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(job),
+  })
+}
+
+export function getWorkerJob(workerId: string, jobId: string): Promise<{ job: WorkerJob }> {
+  return request(`/api/workers/${encodeURIComponent(workerId)}/jobs/${encodeURIComponent(jobId)}`)
 }
 
 export function getCatalogStatus(catalogId: string): Promise<CatalogStatus> {

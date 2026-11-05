@@ -52,6 +52,14 @@ For a catalog that needs a bearer token, put the **environment variable name** i
 
 Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTokenEnv`. The app supports unauthenticated and bearer-token REST catalogs. It rejects catalog URLs containing embedded credentials.
 
+## Workers
+
+The API can connect to separate worker services written in Go, Java, Rust, or TypeScript. Set `ICEBERG_WORKERS_JSON` in the API environment. Workers implement the versioned HTTP contract in [workers/openapi.yaml](workers/openapi.yaml). They advertise read-only operations and resolve catalog credentials by catalog ID from their own environment.
+
+The control plane supports optional bearer tokens for worker endpoints through `bearerTokenEnv`. It sends that worker token only to its configured worker. Catalog credentials are never forwarded to workers.
+
+To submit a sample job, send `POST /api/workers/{workerId}/jobs` with a catalog ID, table identifier, operation, and row limit. The worker returns a job ID; read its progress at `GET /api/workers/{workerId}/jobs/{jobId}`.
+
 ## API
 
 - `GET /api/health`
@@ -62,6 +70,10 @@ Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTo
 - `GET /api/catalogs/{id}/namespaces`
 - `GET /api/catalogs/{id}/tables?namespace=...`
 - `GET /api/catalogs/{id}/table?namespace=...&name=...`
+- `GET /api/workers`
+- `GET /api/workers/{id}/status`
+- `POST /api/workers/{id}/jobs`
+- `GET /api/workers/{id}/jobs/{jobId}`
 
 Namespace components use repeated `namespace` or `parent` query parameters. Listing routes return Iceberg pagination tokens.
 
