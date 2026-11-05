@@ -6,17 +6,18 @@ The current build is a local catalog explorer. It shows namespaces, tables, sche
 
 ## Quick start
 
-Requirements: Node.js 22 or newer, pnpm 10, and Docker.
+Requirements: Node.js 22 or newer, pnpm 10, Docker, and Go 1.26.3 or newer for local worker tests.
 
 ```sh
 cp .env.example .env
-docker compose up -d iceberg-rest
+docker compose up -d --build
 pnpm install
 pnpm seed:fixture
+docker compose run --rm --entrypoint /usr/local/bin/seed-fixture iceberg-go-worker
 pnpm dev
 ```
 
-Open <http://localhost:5173>. The seed command adds an `analytics.events` table to the fixture.
+Open <http://localhost:5173>, choose `analytics.events`, and click **Sample rows** in the Go worker panel. The fixture includes three sample events. **Inspect with Go** shows the table schema returned by Apache Iceberg Go.
 
 The API binds to `127.0.0.1` by default. This first build is for one local operator. Do not expose it to a shared network.
 
@@ -54,11 +55,13 @@ Supported fields are `id`, `name`, `uri`, and optional `warehouse` and `bearerTo
 
 ## Workers
 
-The API can connect to separate worker services written in Go, Java, Rust, or TypeScript. Set `ICEBERG_WORKERS_JSON` in the API environment. Workers implement the versioned HTTP contract in [workers/openapi.yaml](workers/openapi.yaml). They advertise read-only operations and resolve catalog credentials by catalog ID from their own environment.
+The repository includes a Go worker that uses the current Apache Iceberg Go module. It validates REST catalogs, inspects table metadata, and reads sample rows from Parquet data files. Docker Compose starts the worker at `http://localhost:8090` beside the REST fixture. The shared fixture volume lets the Go worker read the fixture's local table files.
+
+The API can also connect to separate workers written in Java, Rust, TypeScript, or another language. Set `ICEBERG_WORKERS_JSON` in the API environment. Workers implement the versioned HTTP contract in [workers/openapi.yaml](workers/openapi.yaml). They advertise read-only operations and resolve catalog credentials by catalog ID from their own environment.
 
 The control plane supports optional bearer tokens for worker endpoints through `bearerTokenEnv`. It sends that worker token only to its configured worker. Catalog credentials are never forwarded to workers.
 
-To submit a sample job, send `POST /api/workers/{workerId}/jobs` with a catalog ID, table identifier, operation, and row limit. The worker returns a job ID; read its progress at `GET /api/workers/{workerId}/jobs/{jobId}`.
+On a table page, use **Validate catalog**, **Inspect with Go**, or **Sample rows**. The page polls the job and renders the result. To run the full HTTP flow from a terminal, use `pnpm e2e:iceberg-go`.
 
 ## API
 
@@ -84,9 +87,10 @@ pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
+go -C workers/iceberg-go test ./...
 ```
 
-The project uses a pnpm workspace with a React/TypeScript UI and a Node/TypeScript API. The API uses the TypeScript Iceberg REST client for catalog operations. A later worker interface can run deeper Iceberg operations through Go, Java, or Rust implementations.
+The project uses a pnpm workspace with a React/TypeScript UI and a Node/TypeScript API. The API uses the TypeScript Iceberg REST client for catalog browsing. The Go worker uses Apache Iceberg Go for its catalog and table operations.
 
 ## License
 

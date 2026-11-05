@@ -9,11 +9,15 @@ import {
   getNamespaces,
   getTable,
   getTables,
+  getWorkerJob,
   getWorkerStatus,
   getWorkers,
+  submitWorkerJob,
   type NamespaceIdentifier,
   type TableIdentifier,
   type TableSummary,
+  type WorkerJob,
+  type WorkerJobSubmission,
 } from './api'
 import './App.css'
 
@@ -441,7 +445,13 @@ function CatalogExplorer() {
           </div>
 
           {selectedTable ? (
-            <TableDetails query={table} tableName={selectedTable} onBack={() => setLocation(selectedNamespace)} />
+            <TableDetails
+              catalogId={catalog.id}
+              namespace={selectedNamespace}
+              query={table}
+              tableName={selectedTable}
+              onBack={() => setLocation(selectedNamespace)}
+            />
           ) : selectedNamespace.length === 0 ? (
             <section className="section-card">
               <div className="section-title-row content-title">
@@ -520,10 +530,14 @@ function CatalogExplorer() {
 }
 
 function TableDetails({
+  catalogId,
+  namespace,
   query,
   tableName,
   onBack,
 }: {
+  catalogId: string
+  namespace: string[]
   query: UseQueryResult<{ table: TableSummary }, Error>
   tableName: string
   onBack: () => void
@@ -541,6 +555,7 @@ function TableDetails({
   const table = query.data.table
   return (
     <div className="details-stack">
+      <TableWorkerJobs key={JSON.stringify([catalogId, namespace, tableName])} catalogId={catalogId} namespace={namespace} tableName={tableName} />
       <div className="detail-stats">
         <div className="stat-card"><span>Format version</span><strong>v{table.formatVersion}</strong></div>
         <div className="stat-card"><span>Snapshots</span><strong>{table.snapshotCount}</strong></div>
@@ -613,6 +628,198 @@ function TableDetails({
         )}
       </section>
     </div>
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function displayCell(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function formatEngineName(engine: string): string {
+  return engine.split(/[/-]/).filter(Boolean).map((part) => `${part[0]!.toUpperCase()}${part.slice(1)}`).join(' ')
+}
+
+function WorkerResult({ result }: { result: Record<string, unknown> }) {
+  const fields = Array.isArray(result.schema) ? result.schema.filter(isRecord) : []
+  const rows = Array.isArray(result.rows) ? result.rows.filter(isRecord) : []
+  const namespaces = Array.isArray(result.namespaces) ? result.namespaces.filter(Array.isArray) : []
+  const columns = fields.flatMap((field) => typeof field.name === 'string' ? [field.name] : [])
+  const showsRequired = fields.some((field) => typeof field.required === 'boolean')
+
+  return (
+    <div className="worker-result">
+      <div className="worker-result-stats">
+        {typeof result.formatVersion === 'number' && <div><span>Format</span><strong>v{result.formatVersion}</strong></div>}
+        {typeof result.snapshotCount === 'number' && <div><span>Snapshots</span><strong>{result.snapshotCount}</strong></div>}
+        {typeof result.namespaceCount === 'number' && <div><span>Namespaces</span><strong>{result.namespaceCount}</strong></div>}
+        {typeof result.rowCount === 'number' && <div><span>Rows returned</span><strong>{result.rowCount}</strong></div>}
+      </div>
+      {fields.length > 0 && (
+        <div className="worker-result-table-wrap">
+          <table className="worker-result-table">
+            <thead><tr><th>Field</th><th>Type</th>{showsRequired && <th>Required</th>}</tr></thead>
+            <tbody>{fields.map((field, index) => (
+              <tr key={`${String(field.id ?? index)}:${String(field.name ?? '')}`}>
+                <td>{typeof field.name === 'string' ? field.name : 'Field'}</td>
+                <td><code>{typeof field.type === 'string' ? field.type : '—'}</code></td>
+                {showsRequired && <td>{field.required === true ? 'Yes' : 'No'}</td>}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="worker-result-table-wrap">
+          <table className="worker-result-table">
+            <thead><tr>{(columns.length > 0 ? columns : Object.keys(rows[0]!)).map((column) => <th key={column}>{column}</th>)}</tr></thead>
+            <tbody>{rows.map((row, index) => (
+              <tr key={index}>{(columns.length > 0 ? columns : Object.keys(rows[0]!)).map((column) => (
+                <td key={column}>{displayCell(row[column])}</td>
+              ))}</tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {namespaces.length > 0 && (
+        <div className="tag-list">
+          {namespaces.map((namespace, index) => <span className="tag" key={index}>{namespace.map(String).join(' / ')}</span>)}
+        </div>
+      )}
+      <details className="worker-raw-result">
+        <summary>Raw result</summary>
+        <pre>{JSON.stringify(result, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
+function TableWorkerJobs({ catalogId, namespace, tableName }: { catalogId: string; namespace: string[]; tableName: string }) {
+  const workers = useQuery({ queryKey: ['workers'], queryFn: getWorkers, staleTime: 30_000 })
+  const [workerId, setWorkerId] = useState('')
+  const [rowLimit, setRowLimit] = useState(10)
+  const [jobId, setJobId] = useState('')
+  const activeWorkerId = workerId || workers.data?.[0]?.id || ''
+  const workerStatus = useQuery({
+    queryKey: ['worker-status', activeWorkerId],
+    queryFn: () => getWorkerStatus(activeWorkerId),
+    enabled: Boolean(activeWorkerId),
+    staleTime: 30_000,
+  })
+  const job = useQuery({
+    queryKey: ['worker-job', activeWorkerId, jobId],
+    queryFn: () => getWorkerJob(activeWorkerId, jobId),
+    enabled: Boolean(activeWorkerId && jobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.job.status
+      return status === 'succeeded' || status === 'failed' ? false : 500
+    },
+    refetchIntervalInBackground: true,
+  })
+  const submit = useMutation({
+    mutationFn: (submission: WorkerJobSubmission) => submitWorkerJob(activeWorkerId, submission),
+    onSuccess: (accepted) => setJobId(accepted.jobId),
+  })
+  const operations = workerStatus.data?.worker.capabilities.operations ?? []
+  const ready = workerStatus.data?.worker.health.status === 'ready'
+  const changeWorker = (nextWorkerId: string) => {
+    setWorkerId(nextWorkerId)
+    setJobId('')
+    submit.reset()
+  }
+  const sendJob = (operation: WorkerJobSubmission['operation']) => {
+    setJobId('')
+    submit.reset()
+    if (operation === 'catalog.validate') {
+      submit.mutate({ protocolVersion: 1, operation, catalogId })
+      return
+    }
+    if (operation === 'table.inspect') {
+      submit.mutate({ protocolVersion: 1, operation, catalogId, table: { namespace, name: tableName } })
+      return
+    }
+    submit.mutate({
+      protocolVersion: 1,
+      operation,
+      catalogId,
+      table: { namespace, name: tableName },
+      options: { rowLimit },
+    })
+  }
+
+  if (workers.isPending) {
+    return <section className="section-card worker-job-card"><Loading label="workers" /></section>
+  }
+  if (workers.isError) {
+    return <section className="section-card worker-job-card"><ErrorMessage message="Could not load workers." /></section>
+  }
+  if (workers.data.length === 0) {
+    return (
+      <section className="section-card worker-job-card">
+        <div className="content-title"><p className="eyebrow">Iceberg workers</p><h2>Run this table through a worker</h2></div>
+        <p className="muted">Configure a worker to inspect this table and read sample rows.</p>
+        <Link className="secondary-button worker-config-link" to="/workers">Open worker settings</Link>
+      </section>
+    )
+  }
+
+  const selectedWorker = workers.data.find((worker) => worker.id === activeWorkerId)
+  const runtime = workerStatus.data?.worker.health.runtime
+  const engineName = runtime ? formatEngineName(runtime.engine) : 'Iceberg worker'
+  const currentJob: WorkerJob | undefined = job.data?.job
+  return (
+    <section className="section-card worker-job-card" aria-label={`${selectedWorker?.name ?? 'Iceberg worker'} operations`}>
+      <div className="section-title-row worker-job-heading">
+        <div><p className="eyebrow">Powered by {engineName}</p><h2>Try this table with {selectedWorker?.name ?? 'a worker'}</h2></div>
+        {workers.data.length > 1 ? (
+          <label className="worker-select-label">
+            <span className="field-label">Worker</span>
+            <select value={activeWorkerId} onChange={(event) => changeWorker(event.target.value)}>
+              {workers.data.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
+            </select>
+          </label>
+        ) : <span className={`worker-state${ready ? ' is-ready' : workerStatus.data ? ' is-degraded' : ''}`}><span />{selectedWorker?.name ?? workers.data[0]!.name}</span>}
+      </div>
+      {workerStatus.isPending && <p className="muted">Checking worker…</p>}
+      {workerStatus.isError && <ErrorMessage message="The worker is offline. Check its URL and API credentials." />}
+      {workerStatus.data && (
+        <>
+          <div className="worker-job-runtime">
+            <span className="worker-language">{runtime ? `${runtime.language[0]!.toUpperCase()}${runtime.language.slice(1)} ${runtime.engineVersion}` : 'Worker runtime'}</span>
+            <span>{runtime?.version}</span>
+            <span className={`worker-state${ready ? ' is-ready' : ' is-degraded'}`}><span />{workerStatus.data.worker.health.status}</span>
+          </div>
+          {!ready && <p className="muted">This worker is degraded. Results may not be available.</p>}
+          <div className="worker-job-actions">
+            <button className="secondary-button" disabled={!ready || submit.isPending || !operations.includes('catalog.validate')} onClick={() => sendJob('catalog.validate')} type="button">Validate catalog</button>
+            <button className="secondary-button" disabled={!ready || submit.isPending || !operations.includes('table.inspect')} onClick={() => sendJob('table.inspect')} type="button">Inspect with {runtime ? `${runtime.language[0]!.toUpperCase()}${runtime.language.slice(1)}` : 'worker'}</button>
+            <label className="worker-row-limit">
+              <span className="field-label">Rows</span>
+              <input aria-label="Sample row limit" max={100} min={1} onChange={(event) => setRowLimit(Number(event.target.value))} step={1} type="number" value={rowLimit} />
+            </label>
+            <button className="primary-button" disabled={!ready || submit.isPending || !operations.includes('table.sample') || !Number.isInteger(rowLimit) || rowLimit < 1 || rowLimit > 100} onClick={() => sendJob('table.sample')} type="button">{submit.isPending ? 'Submitting…' : 'Sample rows'}</button>
+          </div>
+          {submit.isError && <ErrorMessage message={submit.error.message} />}
+          {job.isError && <ErrorMessage message={job.error.message} />}
+          {currentJob && (
+            <div className="worker-job-output" aria-live="polite">
+              <div className="worker-job-output-heading">
+                <div><p className="eyebrow">Go worker result</p><span className="worker-job-id">Job {currentJob.jobId}</span></div>
+                <span className={`worker-job-status status-${currentJob.status}`}>{currentJob.status}{currentJob.progress !== undefined ? ` · ${Math.round(currentJob.progress * 100)}%` : ''}</span>
+              </div>
+              {currentJob.status === 'failed' && currentJob.error && <ErrorMessage message={currentJob.error.message} />}
+              {currentJob.status === 'succeeded' && currentJob.result && <WorkerResult result={currentJob.result} />}
+              {(currentJob.status === 'queued' || currentJob.status === 'running') && <p className="muted">Reading table metadata and files with Apache Iceberg Go…</p>}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
