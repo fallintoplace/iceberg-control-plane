@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router'
 import {
@@ -9,6 +9,8 @@ import {
   getNamespaces,
   getTable,
   getTables,
+  getWorkerStatus,
+  getWorkers,
   type NamespaceIdentifier,
   type TableIdentifier,
   type TableSummary,
@@ -181,6 +183,86 @@ function CatalogSettings() {
   )
 }
 
+function WorkersPage() {
+  const workers = useQuery({ queryKey: ['workers'], queryFn: getWorkers })
+  const statuses = useQueries({
+    queries: (workers.data ?? []).map((worker) => ({
+      queryKey: ['worker-status', worker.id],
+      queryFn: () => getWorkerStatus(worker.id),
+      staleTime: 30_000,
+    })),
+  })
+
+  return (
+    <div className="settings-page">
+      <header className="topbar">
+        <Link className="brand" to="/" aria-label="Iceberg Control Plane home">
+          <span className="brand-mark" aria-hidden="true"><span /></span>
+          <span>Iceberg <strong>Control Plane</strong></span>
+        </Link>
+        <Link className="back-button" to="/">Back to explorer</Link>
+      </header>
+      <main className="settings-content">
+        <div className="page-heading">
+          <div><p className="eyebrow">Polyglot runtime</p><h1>Iceberg workers</h1></div>
+          <a className="contract-link" href="https://github.com/fallintoplace/iceberg-control-plane/blob/main/workers/openapi.yaml" target="_blank" rel="noreferrer">Worker contract v1 ↗</a>
+        </div>
+
+        {workers.isPending && <Loading label="workers" />}
+        {workers.isError && <ErrorMessage message="Could not load configured workers." />}
+        {workers.data?.length === 0 && (
+          <section className="empty-state worker-empty-state">
+            <div className="empty-icon" aria-hidden="true">⌘</div>
+            <p className="eyebrow">No workers configured</p>
+            <h1>Add a Go, Java, or Rust worker</h1>
+            <p>Workers use the versioned HTTP contract. Each worker keeps its own catalog credentials and reports the Iceberg engine and operations it supports.</p>
+            <pre>{`ICEBERG_WORKERS_JSON='[{"id":"iceberg-go","name":"Iceberg Go","uri":"http://localhost:8090"}]'`}</pre>
+          </section>
+        )}
+        {workers.data && workers.data.length > 0 && (
+          <section className="worker-grid" aria-label="Configured workers">
+            {workers.data.map((worker, index) => {
+              const statusQuery = statuses[index]
+              const status = statusQuery?.data?.worker
+              const isReady = status?.health.status === 'ready'
+              return (
+                <article className="section-card worker-card" key={worker.id}>
+                  <div className="worker-card-heading">
+                    <span className="catalog-initial" aria-hidden="true">{worker.name.slice(0, 1).toUpperCase()}</span>
+                    <div className="configured-catalog-name"><strong>{worker.name}</strong><code>{worker.id}</code></div>
+                    <span className={`worker-state${isReady ? ' is-ready' : status ? ' is-degraded' : ''}`}>
+                      <span />{statusQuery?.isPending ? 'Checking' : statusQuery?.isError ? 'Offline' : status?.health.status ?? 'Unknown'}
+                    </span>
+                  </div>
+                  {statusQuery?.isError && <p className="worker-error">Check the worker URL and API credentials.</p>}
+                  {status && (
+                    <>
+                      <div className="worker-runtime">
+                        <span className="worker-language">{status.health.runtime.language}</span>
+                        <span>{status.health.runtime.engine} {status.health.runtime.engineVersion}</span>
+                        <span>Worker {status.health.runtime.version}</span>
+                      </div>
+                      <div className="partition-block">
+                        <p className="field-label">Read-only operations</p>
+                        {status.capabilities.operations.length === 0 ? <span className="muted">No operations advertised</span> : (
+                          <div className="tag-list">
+                            {status.capabilities.operations.map((operation) => <span className="tag" key={operation}>{operation}</span>)}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </article>
+              )
+            })}
+          </section>
+        )}
+        <p className="settings-footnote">Configure workers with <code>ICEBERG_WORKERS_JSON</code>. The control plane sends catalog IDs and table identifiers; workers resolve credentials from their own environment.</p>
+      </main>
+    </div>
+  )
+}
+
 function Home() {
   const catalogs = useQuery({ queryKey: ['catalogs'], queryFn: getCatalogs })
 
@@ -276,6 +358,7 @@ function CatalogExplorer() {
         </Link>
         <div className="topbar-right">
           <span className="read-only-badge"><span />Read only</span>
+          <Link className="topbar-link" to="/workers">Workers</Link>
           <Link className="topbar-link" to="/settings">Manage catalogs</Link>
           <span className="topbar-caption">Catalog operations</span>
         </div>
@@ -539,6 +622,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/settings" element={<CatalogSettings />} />
+        <Route path="/workers" element={<WorkersPage />} />
         <Route path="/catalog/:catalogId" element={<CatalogExplorer />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

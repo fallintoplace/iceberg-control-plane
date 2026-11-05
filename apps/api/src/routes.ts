@@ -1,5 +1,6 @@
 import { getCurrentSchema, type Snapshot, type TableMetadata } from 'iceberg-js'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { randomUUID } from 'node:crypto'
 import {
   CatalogAlreadyExistsError,
   CatalogNotFoundError,
@@ -7,6 +8,13 @@ import {
   parseCatalogDefinition,
   type CatalogClient,
 } from './catalogs.js'
+import {
+  parseWorkerJobSubmission,
+  WorkerProtocolError,
+  WorkerRegistry,
+  WorkerRequestError,
+  type WorkerClient,
+} from './workers.js'
 
 type QueryValue = string | string[] | undefined
 
@@ -58,6 +66,12 @@ function pageOptions(query: ListQuery): { pageSize?: number; pageToken?: string 
 function requireClient(registry: CatalogRegistry, catalogId: string): CatalogClient {
   const client = registry.client(catalogId)
   if (!client) throw new RouteError(404, 'Catalog not found.')
+  return client
+}
+
+function requireWorker(registry: WorkerRegistry, workerId: string): WorkerClient {
+  const client = registry.client(workerId)
+  if (!client) throw new RouteError(404, 'Worker not found.')
   return client
 }
 
@@ -147,6 +161,7 @@ export function registerRoutes(
   app: FastifyInstance,
   registry: CatalogRegistry,
   environment: NodeJS.ProcessEnv = process.env,
+  workers: WorkerRegistry = new WorkerRegistry([], environment),
 ): void {
   app.get('/api/health', async () => ({ status: 'ok' }))
 
@@ -184,6 +199,78 @@ export function registerRoutes(
       return reply.code(500).send({ error: 'Could not save catalog configuration.' })
     }
   })
+
+  app.get('/api/workers', async () => ({ workers: workers.list() }))
+
+  app.get<{ Params: { workerId: string } }>('/api/workers/:workerId/status', async (request, reply) => {
+    const { workerId } = request.params
+    try {
+      const definition = workers.definition(workerId)
+      if (!definition) throw new RouteError(404, 'Worker not found.')
+      const worker = requireWorker(workers, workerId)
+      const [health, capabilities] = await Promise.all([worker.health(), worker.capabilities()])
+      return {
+        worker: {
+          id: workerId,
+          name: definition.name,
+          health,
+          capabilities,
+        },
+      }
+    } catch (error) {
+      if (error instanceof RouteError) return reply.code(error.statusCode).send({ error: error.message })
+      request.log.warn({ workerId }, 'Worker status request failed')
+      return reply.code(502).send({ error: 'Worker request failed.' })
+    }
+  })
+
+  app.post<{ Params: { workerId: string } }>('/api/workers/:workerId/jobs', async (request, reply) => {
+    let job
+    try {
+      job = parseWorkerJobSubmission(request.body)
+    } catch {
+      return reply.code(400).send({ error: 'Invalid worker job request.' })
+    }
+
+    if (!registry.definition(job.catalogId)) {
+      return reply.code(404).send({ error: 'Catalog not found.' })
+    }
+
+    const { workerId } = request.params
+    try {
+      const worker = requireWorker(workers, workerId)
+      const capabilities = await worker.capabilities()
+      if (!capabilities.operations.includes(job.operation)) {
+        return reply.code(422).send({ error: 'Worker does not support this operation.' })
+      }
+
+      const accepted = await worker.submitJob({ ...job, requestId: job.requestId ?? randomUUID() })
+      return reply.code(202).send(accepted)
+    } catch (error) {
+      if (error instanceof RouteError) return reply.code(error.statusCode).send({ error: error.message })
+      request.log.warn({ workerId }, 'Worker job submission failed')
+      return reply.code(502).send({ error: 'Worker request failed.' })
+    }
+  })
+
+  app.get<{ Params: { workerId: string; jobId: string } }>(
+    '/api/workers/:workerId/jobs/:jobId',
+    async (request, reply) => {
+      const { workerId, jobId } = request.params
+      try {
+        const job = await requireWorker(workers, workerId).getJob(jobId)
+        if (job.jobId !== jobId) throw new WorkerProtocolError()
+        return { job }
+      } catch (error) {
+        if (error instanceof RouteError) return reply.code(error.statusCode).send({ error: error.message })
+        if (error instanceof WorkerRequestError && error.statusCode === 404) {
+          return reply.code(404).send({ error: 'Job not found.' })
+        }
+        request.log.warn({ workerId }, 'Worker job request failed')
+        return reply.code(502).send({ error: 'Worker request failed.' })
+      }
+    },
+  )
 
   app.get<{ Params: RouteParams }>('/api/catalogs/:catalogId/status', async (request, reply) => {
     const { catalogId } = request.params

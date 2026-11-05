@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: Iceberg Control Plane Worker API
+  version: 1.0.0
+  description: |
+    Language-neutral HTTP contract for Iceberg workers. Workers may be written
+    in Go, Java, Rust, TypeScript, or another language. Catalog credentials stay
+    in the worker deployment and are looked up by catalogId.
+servers:
+  - url: http://localhost:8090
+security:
+  - {}
+  - WorkerBearerAuth: []
+paths:
+  /v1/health:
+    get:
+      operationId: getWorkerHealth
+      summary: Report worker health and runtime information
+      responses:
+        '200':
+          description: Worker health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerHealth'
+  /v1/capabilities:
+    get:
+      operationId: getWorkerCapabilities
+      summary: List read-only operations supported by the worker
+      responses:
+        '200':
+          description: Worker capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerCapabilities'
+  /v1/jobs:
+    post:
+      operationId: submitWorkerJob
+      summary: Submit a read-only Iceberg operation
+      description: |
+        The worker must treat requestId as an idempotency key. The same
+        requestId and payload must return the same job instead of starting a
+        second operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobSubmission'
+      responses:
+        '202':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '400':
+          description: Invalid request
+        '409':
+          description: The requestId was already used with a different payload
+        '422':
+          description: The worker does not support the requested operation
+  /v1/jobs/{jobId}:
+    get:
+      operationId: getWorkerJob
+      summary: Read job state and result
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Current job state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatus'
+        '404':
+          description: Job not found
+components:
+  securitySchemes:
+    WorkerBearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    WorkerHealth:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, status, runtime]
+      properties:
+        protocolVersion:
+          const: 1
+        status:
+          type: string
+          enum: [ready, degraded]
+        runtime:
+          type: object
+          additionalProperties: false
+          required: [language, version, engine, engineVersion]
+          properties:
+            language:
+              type: string
+              enum: [go, java, rust, typescript, other]
+            version:
+              type: string
+              minLength: 1
+              description: Worker application version.
+            engine:
+              type: string
+              minLength: 1
+              description: Iceberg implementation used by this worker.
+            engineVersion:
+              type: string
+              minLength: 1
+    WorkerCapabilities:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, operations]
+      properties:
+        protocolVersion:
+          const: 1
+        operations:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items:
+            type: string
+            enum: [catalog.validate, table.inspect, table.sample]
+    TableIdentifier:
+      type: object
+      additionalProperties: false
+      required: [namespace, name]
+      properties:
+        namespace:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+    JobSubmission:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [protocolVersion, requestId, operation, catalogId]
+          properties:
+            protocolVersion:
+              const: 1
+            requestId:
+              type: string
+              format: uuid
+            operation:
+              const: catalog.validate
+            catalogId:
+              type: string
+              pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+        - type: object
+          additionalProperties: false
+          required: [protocolVersion, requestId, operation, catalogId, table]
+          properties:
+            protocolVersion:
+              const: 1
+            requestId:
+              type: string
+              format: uuid
+            operation:
+              const: table.inspect
+            catalogId:
+              type: string
+              pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+            table:
+              $ref: '#/components/schemas/TableIdentifier'
+        - type: object
+          additionalProperties: false
+          required: [protocolVersion, requestId, operation, catalogId, table, options]
+          properties:
+            protocolVersion:
+              const: 1
+            requestId:
+              type: string
+              format: uuid
+            operation:
+              const: table.sample
+            catalogId:
+              type: string
+              pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+            table:
+              $ref: '#/components/schemas/TableIdentifier'
+            options:
+              type: object
+              additionalProperties: false
+              required: [rowLimit]
+              properties:
+                rowLimit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+      discriminator:
+        propertyName: operation
+    JobAccepted:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, jobId, status]
+      properties:
+        protocolVersion:
+          const: 1
+        jobId:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [queued, running]
+    JobStatus:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, jobId, status]
+      properties:
+        protocolVersion:
+          const: 1
+        jobId:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        result:
+          type: object
+          description: Operation result, present only after success. Must not contain credentials.
+          additionalProperties: true
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 100
+            message:
+              type: string
+              maxLength: 500
+              description: Safe user-facing text. Do not include credentials, stack traces, or internal paths.
+            retryable:
+              type: boolean
+      allOf:
+        - if:
+            properties:
+              status:
+                const: succeeded
+          then:
+            required: [result]
+        - if:
+            properties:
+              status:
+                const: failed
+          then:
+            required: [error]
