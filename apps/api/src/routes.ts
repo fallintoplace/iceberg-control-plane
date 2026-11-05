@@ -1,6 +1,12 @@
 import { getCurrentSchema, type Snapshot, type TableMetadata } from 'iceberg-js'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { CatalogRegistry, type CatalogClient } from './catalogs.js'
+import {
+  CatalogAlreadyExistsError,
+  CatalogNotFoundError,
+  CatalogRegistry,
+  parseCatalogDefinition,
+  type CatalogClient,
+} from './catalogs.js'
 
 type QueryValue = string | string[] | undefined
 
@@ -140,10 +146,44 @@ async function handleCatalogRequest<T>(
 export function registerRoutes(
   app: FastifyInstance,
   registry: CatalogRegistry,
+  environment: NodeJS.ProcessEnv = process.env,
 ): void {
   app.get('/api/health', async () => ({ status: 'ok' }))
 
   app.get('/api/catalogs', async () => ({ catalogs: registry.list() }))
+
+  app.post('/api/catalogs', async (request, reply) => {
+    let definition
+    try {
+      definition = parseCatalogDefinition(request.body, environment)
+    } catch {
+      return reply.code(400).send({ error: 'Invalid catalog configuration.' })
+    }
+
+    try {
+      const catalog = await registry.add(definition)
+      return reply.code(201).send({ catalog })
+    } catch (error) {
+      if (error instanceof CatalogAlreadyExistsError) {
+        return reply.code(409).send({ error: 'A catalog with this id already exists.' })
+      }
+      request.log.error({ err: error }, 'Failed to save catalog configuration')
+      return reply.code(500).send({ error: 'Could not save catalog configuration.' })
+    }
+  })
+
+  app.delete<{ Params: RouteParams }>('/api/catalogs/:catalogId', async (request, reply) => {
+    try {
+      await registry.remove(request.params.catalogId)
+      return { deleted: true }
+    } catch (error) {
+      if (error instanceof CatalogNotFoundError) {
+        return reply.code(404).send({ error: 'Catalog not found.' })
+      }
+      request.log.error({ err: error }, 'Failed to save catalog configuration')
+      return reply.code(500).send({ error: 'Could not save catalog configuration.' })
+    }
+  })
 
   app.get<{ Params: RouteParams }>('/api/catalogs/:catalogId/status', async (request, reply) => {
     const { catalogId } = request.params

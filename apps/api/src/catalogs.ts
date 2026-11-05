@@ -30,6 +30,12 @@ export type CatalogClientFactory = (
   environment: NodeJS.ProcessEnv,
 ) => CatalogClient
 
+export type PersistCatalogDefinitions = (definitions: CatalogDefinition[]) => Promise<void>
+
+export class CatalogAlreadyExistsError extends Error {}
+
+export class CatalogNotFoundError extends Error {}
+
 function validateCatalogUrl(uri: string): void {
   const url = new URL(uri)
 
@@ -45,6 +51,7 @@ function validateCatalogUrl(uri: string): void {
 export function parseCatalogDefinitions(
   raw: string | undefined,
   environment: NodeJS.ProcessEnv = process.env,
+  source = 'ICEBERG_CATALOGS_JSON',
 ): CatalogDefinition[] {
   if (!raw?.trim()) return []
 
@@ -52,12 +59,12 @@ export function parseCatalogDefinitions(
   try {
     input = JSON.parse(raw)
   } catch {
-    throw new Error('ICEBERG_CATALOGS_JSON must contain valid JSON.')
+    throw new Error(`${source} must contain valid JSON.`)
   }
 
   const result = catalogConfigListSchema.safeParse(input)
   if (!result.success) {
-    throw new Error('ICEBERG_CATALOGS_JSON has an invalid catalog configuration.')
+    throw new Error(`${source} has an invalid catalog configuration.`)
   }
 
   const seenIds = new Set<string>()
@@ -79,6 +86,16 @@ export function parseCatalogDefinitions(
   }
 
   return result.data
+}
+
+export function parseCatalogDefinition(
+  input: unknown,
+  environment: NodeJS.ProcessEnv = process.env,
+): CatalogDefinition {
+  const definitions = parseCatalogDefinitions(JSON.stringify([input]), environment, 'Catalog connection')
+  const definition = definitions[0]
+  if (!definition) throw new Error('Catalog configuration must contain one catalog.')
+  return definition
 }
 
 function createIcebergClient(
@@ -104,8 +121,17 @@ export class CatalogRegistry {
     definitions: CatalogDefinition[],
     private readonly environment: NodeJS.ProcessEnv = process.env,
     private readonly clientFactory: CatalogClientFactory = createIcebergClient,
+    private readonly persistDefinitions: PersistCatalogDefinitions = async () => {},
   ) {
     this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
+  }
+
+  private mutations: Promise<void> = Promise.resolve()
+
+  private serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutations.then(operation, operation)
+    this.mutations = result.then(() => undefined, () => undefined)
+    return result
   }
 
   list(): PublicCatalog[] {
@@ -127,5 +153,27 @@ export class CatalogRegistry {
     }
 
     return client
+  }
+
+  add(definition: CatalogDefinition): Promise<PublicCatalog> {
+    return this.serializeMutation(async () => {
+      if (this.definitionsById.has(definition.id)) throw new CatalogAlreadyExistsError()
+
+      const definitions = [...this.definitionsById.values(), definition]
+      await this.persistDefinitions(definitions)
+      this.definitionsById.set(definition.id, definition)
+      return { id: definition.id, name: definition.name }
+    })
+  }
+
+  remove(id: string): Promise<void> {
+    return this.serializeMutation(async () => {
+      if (!this.definitionsById.has(id)) throw new CatalogNotFoundError()
+
+      const definitions = [...this.definitionsById.values()].filter((definition) => definition.id !== id)
+      await this.persistDefinitions(definitions)
+      this.definitionsById.delete(id)
+      this.clientsById.delete(id)
+    })
   }
 }
