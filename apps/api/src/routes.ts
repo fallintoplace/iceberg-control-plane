@@ -1,0 +1,215 @@
+import { getCurrentSchema, type Snapshot, type TableMetadata } from 'iceberg-js'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { CatalogRegistry, type CatalogClient } from './catalogs.js'
+
+type QueryValue = string | string[] | undefined
+
+interface RouteParams {
+  catalogId: string
+}
+
+interface ListQuery {
+  namespace?: QueryValue
+  parent?: QueryValue
+  pageSize?: string
+  pageToken?: string
+}
+
+interface TableQuery {
+  namespace?: QueryValue
+  name?: string
+}
+
+class RouteError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+function repeated(value: QueryValue): string[] {
+  if (value === undefined) return []
+  return (Array.isArray(value) ? value : [value]).filter((part) => part.length > 0)
+}
+
+function pageOptions(query: ListQuery): { pageSize?: number; pageToken?: string } {
+  const options: { pageSize?: number; pageToken?: string } = {}
+  if (query.pageToken) options.pageToken = query.pageToken
+
+  if (query.pageSize !== undefined) {
+    const pageSize = Number(query.pageSize)
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+      throw new RouteError(400, 'pageSize must be an integer between 1 and 1000.')
+    }
+    options.pageSize = pageSize
+  }
+
+  return options
+}
+
+function requireClient(registry: CatalogRegistry, catalogId: string): CatalogClient {
+  const client = registry.client(catalogId)
+  if (!client) throw new RouteError(404, 'Catalog not found.')
+  return client
+}
+
+function safeSnapshot(snapshot: Snapshot) {
+  const allowedSummaryKeys = [
+    'added-data-files',
+    'deleted-data-files',
+    'added-records',
+    'deleted-records',
+    'total-records',
+    'total-data-files',
+    'total-delete-files',
+  ]
+
+  return {
+    snapshotId: snapshot['snapshot-id'],
+    parentSnapshotId: snapshot['parent-snapshot-id'],
+    timestampMs: snapshot['timestamp-ms'],
+    operation: snapshot.summary.operation,
+    summary: Object.fromEntries(
+      allowedSummaryKeys.flatMap((key) =>
+        snapshot.summary[key] === undefined ? [] : [[key, snapshot.summary[key]]],
+      ),
+    ),
+  }
+}
+
+function tableSummary(metadata: TableMetadata) {
+  const snapshots = metadata.snapshots ?? []
+  const recentSnapshots = snapshots.slice(-100).reverse()
+  const schema = getCurrentSchema(metadata)
+  const currentSpec = metadata['partition-specs'].find(
+    (spec) => spec['spec-id'] === metadata['default-spec-id'],
+  )
+
+  return {
+    formatVersion: metadata['format-version'],
+    lastUpdatedMs: metadata['last-updated-ms'],
+    currentSnapshotId: metadata['current-snapshot-id'] === -1
+      ? undefined
+      : metadata['current-snapshot-id'],
+    snapshotCount: snapshots.length,
+    snapshotsTruncated: snapshots.length > recentSnapshots.length,
+    snapshots: recentSnapshots.map(safeSnapshot),
+    currentSchema: schema
+      ? { schemaId: schema['schema-id'], fields: schema.fields }
+      : undefined,
+    currentPartitionSpec: currentSpec
+      ? { specId: currentSpec['spec-id'], fields: currentSpec.fields }
+      : undefined,
+    refs: metadata.refs ?? {},
+  }
+}
+
+function statusForCatalogError(error: unknown): number {
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? Number(error.status)
+    : 0
+
+  return status === 404 ? 404 : 502
+}
+
+async function handleCatalogRequest<T>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  catalogId: string,
+  operation: () => Promise<T>,
+): Promise<T | undefined> {
+  try {
+    return await operation()
+  } catch (error) {
+    if (error instanceof RouteError) {
+      reply.code(error.statusCode).send({ error: error.message })
+      return undefined
+    }
+
+    const statusCode = statusForCatalogError(error)
+    request.log.warn({ catalogId, statusCode }, 'Iceberg catalog request failed')
+    reply.code(statusCode).send({
+      error: statusCode === 404 ? 'Catalog resource not found.' : 'Iceberg catalog request failed.',
+    })
+    return undefined
+  }
+}
+
+export function registerRoutes(
+  app: FastifyInstance,
+  registry: CatalogRegistry,
+): void {
+  app.get('/api/health', async () => ({ status: 'ok' }))
+
+  app.get('/api/catalogs', async () => ({ catalogs: registry.list() }))
+
+  app.get<{ Params: RouteParams }>('/api/catalogs/:catalogId/status', async (request, reply) => {
+    const { catalogId } = request.params
+    return handleCatalogRequest(request, reply, catalogId, async () => {
+      const client = requireClient(registry, catalogId)
+      const config = await client.loadConfig()
+      return {
+        status: 'connected',
+        endpoints: config.endpoints ?? [],
+      }
+    })
+  })
+
+  app.get<{ Params: RouteParams; Querystring: ListQuery }>(
+    '/api/catalogs/:catalogId/namespaces',
+    async (request, reply) => {
+      const { catalogId } = request.params
+      const query = request.query
+      const parent = repeated(query.parent)
+
+      return handleCatalogRequest(request, reply, catalogId, async () => {
+        const client = requireClient(registry, catalogId)
+        const options = pageOptions(query)
+        const response = await client.listNamespaces({
+          ...options,
+          ...(parent.length > 0 ? { parent: { namespace: parent } } : {}),
+        })
+        return { namespaces: response.namespaces, nextPageToken: response.nextPageToken }
+      })
+    },
+  )
+
+  app.get<{ Params: RouteParams; Querystring: ListQuery }>(
+    '/api/catalogs/:catalogId/tables',
+    async (request, reply) => {
+      const { catalogId } = request.params
+      const namespace = repeated(request.query.namespace)
+      if (namespace.length === 0) {
+        return reply.code(400).send({ error: 'At least one namespace component is required.' })
+      }
+
+      return handleCatalogRequest(request, reply, catalogId, async () => {
+        const client = requireClient(registry, catalogId)
+        const options = pageOptions(request.query)
+        const response = await client.listTables({ namespace }, options)
+        return { tables: response.identifiers, nextPageToken: response.nextPageToken }
+      })
+    },
+  )
+
+  app.get<{ Params: RouteParams; Querystring: TableQuery }>(
+    '/api/catalogs/:catalogId/table',
+    async (request, reply) => {
+      const { catalogId } = request.params
+      const namespace = repeated(request.query.namespace)
+      const name = request.query.name?.trim()
+      if (namespace.length === 0 || !name) {
+        return reply.code(400).send({ error: 'Namespace and table name are required.' })
+      }
+
+      return handleCatalogRequest(request, reply, catalogId, async () => {
+        const client = requireClient(registry, catalogId)
+        const metadata = await client.loadTable({ namespace, name }, { snapshots: 'all' })
+        if (!metadata) throw new RouteError(404, 'Table not found.')
+        return { table: tableSummary(metadata) }
+      })
+    },
+  )
+}
