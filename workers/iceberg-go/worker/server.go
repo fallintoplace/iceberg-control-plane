@@ -67,14 +67,14 @@ type storedJob struct {
 }
 
 type Server struct {
-	catalogs      map[string]CatalogProfile
-	workerToken   string
-	workerVersion string
-	executor      JobExecutor
-	mu            sync.RWMutex
-	tutorialMu    sync.Mutex
-	jobs          map[string]*storedJob
-	requests      map[string]string
+	catalogs        map[string]CatalogProfile
+	workerToken     string
+	workerVersion   string
+	executor        JobExecutor
+	mu              sync.RWMutex
+	learningTableMu sync.Mutex
+	jobs            map[string]*storedJob
+	requests        map[string]string
 }
 
 func NewServer(catalogs map[string]CatalogProfile, workerToken, workerVersion string, executor JobExecutor) *Server {
@@ -289,9 +289,9 @@ func (s *Server) runJob(jobID string, submission JobSubmission) {
 	profile := s.catalogs[submission.CatalogID]
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if isTutorialOperation(submission.Operation) {
-		s.tutorialMu.Lock()
-		defer s.tutorialMu.Unlock()
+	if touchesLearningTable(submission) {
+		s.learningTableMu.Lock()
+		defer s.learningTableMu.Unlock()
 	}
 	result, err := s.executor(ctx, profile, submission)
 
@@ -316,6 +316,14 @@ func (s *Server) runJob(jobID string, submission JobSubmission) {
 
 func isTutorialOperation(operation string) bool {
 	return operation == "tutorial.append" || operation == "tutorial.reset"
+}
+
+func touchesLearningTable(submission JobSubmission) bool {
+	if isTutorialOperation(submission.Operation) {
+		return true
+	}
+	return submission.Table != nil && submission.Table.Name == "events" &&
+		len(submission.Table.Namespace) == 1 && submission.Table.Namespace[0] == "analytics"
 }
 
 func safeErrorKind(err error) string {

@@ -105,7 +105,7 @@ func ResetLearningLab(ctx context.Context, catalog *rest.Catalog) (map[string]an
 	)
 	spec := iceberg.UnpartitionedSpec
 	createOptions := []icebergcatalog.CreateTableOpt{
-		icebergcatalog.WithPartitionSpec(&spec),
+		icebergcatalog.WithPartitionSpec(spec),
 		icebergcatalog.WithProperties(iceberg.Properties{"write.format.default": "parquet"}),
 	}
 	if location != "" {

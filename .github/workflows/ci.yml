@@ -24,6 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: go test ./...
         working-directory: workers/iceberg-go
+      - run: cp .env.example .env
+      - run: pnpm e2e:iceberg-go
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

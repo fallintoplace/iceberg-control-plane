@@ -150,6 +150,55 @@ func TestLearningLabOperationsRequireExplicitLocalProfile(t *testing.T) {
 	})
 }
 
+func TestLearningLabResetSerializesReadsOfItsTable(t *testing.T) {
+	resetStarted := make(chan struct{})
+	readStarted := make(chan struct{})
+	releaseReset := make(chan struct{})
+	resetReleased := false
+	defer func() {
+		if !resetReleased {
+			close(releaseReset)
+		}
+	}()
+	executor := func(_ context.Context, _ CatalogProfile, submission JobSubmission) (map[string]any, error) {
+		switch submission.Operation {
+		case "tutorial.reset":
+			close(resetStarted)
+			<-releaseReset
+		case "table.inspect":
+			close(readStarted)
+		}
+		return map[string]any{}, nil
+	}
+	server := httptest.NewServer(NewServer(testLearningLabCatalogs(), "", "test", executor).Handler())
+	defer server.Close()
+
+	reset := testSubmission(uuid.NewString(), "tutorial.reset")
+	decodeAccepted(t, postSubmission(t, server.URL, reset))
+	select {
+	case <-resetStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset executor did not start")
+	}
+
+	read := testSubmission(uuid.NewString(), "table.inspect")
+	read.Table = &TableIdentifier{Namespace: []string{"analytics"}, Name: "events"}
+	decodeAccepted(t, postSubmission(t, server.URL, read))
+	select {
+	case <-readStarted:
+		t.Fatal("table inspection ran while the lesson reset was replacing its table")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseReset)
+	resetReleased = true
+	select {
+	case <-readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("table inspection did not resume after the reset finished")
+	}
+}
+
 func TestWorkerAuthorization(t *testing.T) {
 	server := httptest.NewServer(NewServer(testCatalogs(), "worker-secret", "test", nil).Handler())
 	defer server.Close()
