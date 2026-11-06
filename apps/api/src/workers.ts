@@ -20,7 +20,7 @@ const workerHealthSchema = z.object({
 
 const workerCapabilitiesSchema = z.object({
   protocolVersion: z.literal(1),
-  operations: z.array(z.enum(['catalog.validate', 'table.inspect', 'table.sample'])).max(3),
+  operations: z.array(z.enum(['catalog.validate', 'table.inspect', 'table.sample', 'tutorial.append', 'tutorial.reset'])).max(5),
 }).strict().superRefine((capabilities, context) => {
   if (new Set(capabilities.operations).size !== capabilities.operations.length) {
     context.addIssue({ code: 'custom', message: 'Worker operations must be unique.' })
@@ -49,6 +49,8 @@ export const workerJobSubmissionSchema = z.discriminatedUnion('operation', [
     table: tableIdentifierSchema,
     options: z.object({ rowLimit: z.number().int().min(1).max(100) }).strict(),
   }).strict(),
+  jobBaseSchema.extend({ operation: z.literal('tutorial.append') }).strict(),
+  jobBaseSchema.extend({ operation: z.literal('tutorial.reset') }).strict(),
 ])
 
 const workerJobAcceptedSchema = z.object({

@@ -17,7 +17,15 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/iceberg-go/go.mod
+          cache-dependency-path: workers/iceberg-go/go.sum
       - run: pnpm install --frozen-lockfile
+      - run: go test ./...
+        working-directory: workers/iceberg-go
+      - run: cp .env.example .env
+      - run: pnpm e2e:iceberg-go
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

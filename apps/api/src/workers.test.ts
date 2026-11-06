@@ -64,6 +64,19 @@ describe('parseWorkerDefinitions', () => {
 describe('HTTP worker client', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('accepts optional tutorial operations from a local learning worker', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      protocolVersion: 1,
+      operations: ['catalog.validate', 'table.inspect', 'table.sample', 'tutorial.append', 'tutorial.reset'],
+    }), { status: 200 })))
+    const client = new WorkerRegistry(parseWorkerDefinitions(JSON.stringify(workerConfig)), {}).client('rust')!
+
+    await expect(client.capabilities()).resolves.toEqual({
+      protocolVersion: 1,
+      operations: ['catalog.validate', 'table.inspect', 'table.sample', 'tutorial.append', 'tutorial.reset'],
+    })
+  })
+
   it('uses the configured path prefix and worker token for health and capabilities', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

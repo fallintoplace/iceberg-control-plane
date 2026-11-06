@@ -134,6 +134,16 @@ function statusForCatalogError(error: unknown): number {
   return status === 404 ? 404 : 502
 }
 
+function isLocalFixtureCatalog(uri: string): boolean {
+  let hostname: string
+  try {
+    hostname = new URL(uri).hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  } catch {
+    return false
+  }
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === 'iceberg-rest'
+}
+
 async function handleCatalogRequest<T>(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -232,8 +242,12 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid worker job request.' })
     }
 
-    if (!registry.definition(job.catalogId)) {
+    const catalog = registry.definition(job.catalogId)
+    if (!catalog) {
       return reply.code(404).send({ error: 'Catalog not found.' })
+    }
+    if ((job.operation === 'tutorial.append' || job.operation === 'tutorial.reset') && !isLocalFixtureCatalog(catalog.uri)) {
+      return reply.code(422).send({ error: 'Learning lab operations require a local fixture catalog.' })
     }
 
     const { workerId } = request.params

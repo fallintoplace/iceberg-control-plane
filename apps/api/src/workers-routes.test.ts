@@ -27,7 +27,7 @@ const workerCapabilities = {
   operations: ['catalog.validate', 'table.inspect', 'table.sample'],
 }
 
-function makeApp(overrides: Partial<WorkerClient> = {}) {
+function makeApp(overrides: Partial<WorkerClient> = {}, catalogUri = 'http://localhost:8181') {
   const app = Fastify({ logger: false })
   const worker: WorkerClient = {
     health: vi.fn().mockResolvedValue(workerHealth),
@@ -42,7 +42,7 @@ function makeApp(overrides: Partial<WorkerClient> = {}) {
     ...overrides,
   }
   const catalogs = new CatalogRegistry(
-    parseCatalogDefinitions(JSON.stringify([{ id: 'local', name: 'Local', uri: 'http://localhost:8181' }])),
+    parseCatalogDefinitions(JSON.stringify([{ id: 'local', name: 'Local', uri: catalogUri }])),
     {},
   )
   const workers = new WorkerRegistry(workerDefinitions, environment, () => worker)
@@ -100,6 +100,43 @@ describe('worker routes', () => {
       catalogId: 'local',
       requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     }))
+  })
+
+  it('accepts tutorial operations only when the worker advertises them', async () => {
+    const { app, worker } = makeApp({
+      capabilities: vi.fn().mockResolvedValue({
+        ...workerCapabilities,
+        operations: [...workerCapabilities.operations, 'tutorial.append', 'tutorial.reset'],
+      }),
+    })
+    apps.push(app)
+
+    for (const operation of ['tutorial.append', 'tutorial.reset'] as const) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/workers/rust/jobs',
+        payload: { protocolVersion: 1, operation, catalogId: 'local' },
+      })
+
+      expect(response.statusCode).toBe(202)
+      expect(worker.submitJob).toHaveBeenCalledWith(expect.objectContaining({ operation, catalogId: 'local' }))
+    }
+  })
+
+  it('rejects tutorial writes for a remote catalog', async () => {
+    const { app, worker } = makeApp({}, 'https://catalog.example.com')
+    apps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/workers/rust/jobs',
+      payload: { protocolVersion: 1, operation: 'tutorial.append', catalogId: 'local' },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toEqual({ error: 'Learning lab operations require a local fixture catalog.' })
+    expect(worker.capabilities).not.toHaveBeenCalled()
+    expect(worker.submitJob).not.toHaveBeenCalled()
   })
 
   it('rejects invalid row limits before contacting the worker', async () => {

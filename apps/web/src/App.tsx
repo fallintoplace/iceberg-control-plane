@@ -1,6 +1,32 @@
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { ArrowRight, ArrowUpRight, Boxes, Command, CornerLeftUp, Database, Home as HomeIcon, Minus, Plus, RefreshCw, Table2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router'
+import {
+  Alert,
+  Badge,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbSeparator,
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  NativeSelect,
+  Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui'
+import { buttonVariants } from '@/components/ui/button-variants'
+import { WorkerWorkbench } from '@/components/iceberg-go/worker-workbench'
+import { cn } from '@/lib/utils'
 import {
   createCatalog,
   deleteCatalog,
@@ -15,7 +41,107 @@ import {
   type TableIdentifier,
   type TableSummary,
 } from './api'
-import './App.css'
+
+const ui = {
+  appShell: 'min-h-screen',
+  topbar: 'flex h-16 items-center justify-between border-b border-line bg-white px-[30px] max-[640px]:h-[58px] max-[640px]:px-[15px]',
+  brand: 'inline-flex items-center gap-[11px] text-[14px] tracking-[-0.02em] no-underline max-[640px]:text-xs',
+  brandMark: 'grid size-[26px] rotate-45 place-items-center rounded-lg bg-brand',
+  brandMarkInner: 'size-[9px] rounded-[2px] border-[1.5px] border-[#d9fff4]',
+  topbarRight: 'flex items-center gap-[18px] max-[640px]:gap-[10px]',
+  topbarCaption: 'text-xs text-muted max-[640px]:hidden',
+  statusDot: 'size-1.5 rounded-full bg-[#24a786]',
+  topbarLink: 'text-[11px] font-bold text-brand-dark no-underline hover:underline',
+  workspace: 'grid min-h-[calc(100vh-64px)] grid-cols-[260px_minmax(0,1fr)] max-[900px]:grid-cols-[220px_minmax(0,1fr)] max-[640px]:block',
+  sidebar: 'flex flex-col border-r border-line bg-[#fbfcfc] px-4 pb-[18px] pt-[25px] max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:px-[15px] max-[640px]:pb-[10px] max-[640px]:pt-[14px]',
+  sidebarSection: 'border-b border-line px-1 pb-[21px] max-[640px]:pb-3',
+  sidebarSectionCompact: 'border-b-0 border-line px-1 pb-[21px] pt-[19px] max-[640px]:pb-3 max-[640px]:pt-3',
+  fieldLabel: 'block text-[10px] leading-[1.3] font-bold tracking-[.09em] text-[#7a898d] uppercase',
+  connectionState: 'mt-[11px] flex items-center gap-[7px] text-[11px] text-[#6a797d]',
+  sidebarError: 'mt-2 text-[11px] leading-[1.5] text-danger',
+  sectionTitleRow: 'flex items-center justify-between gap-3',
+  namespaceLink: 'mt-[7px] flex w-full items-center gap-[9px] rounded-md bg-transparent px-[9px] py-2 text-left text-xs text-[#536469] hover:bg-[#eff5f3] hover:text-ink max-[640px]:w-auto',
+  namespaceLinkActive: 'bg-brand-soft font-bold text-brand-dark hover:bg-brand-soft hover:text-brand-dark',
+  parentLink: 'text-[#7a898d]',
+  namespaceGlyph: 'inline-flex w-[15px] shrink-0 items-center justify-center text-[#6e8a83]',
+  namespaceList: 'mt-[6px] max-[640px]:flex max-[640px]:flex-wrap max-[640px]:gap-[3px]',
+  compact: 'my-[7px] mx-2 text-[11px]',
+  loadMore: 'mt-2 ml-2 border-0 bg-transparent px-0 py-[5px] text-[11px] font-bold text-brand-dark disabled:cursor-wait disabled:opacity-60',
+  sidebarFootnote: 'mt-auto mx-1 border-t border-line pt-[18px] text-[10px] leading-[1.5] text-[#869397] max-[640px]:hidden',
+  mainContent: 'mx-auto w-full max-w-[1440px] px-[38px] pt-[31px] pb-[22px] max-[900px]:px-[22px] max-[900px]:pt-[25px] max-[640px]:px-[14px] max-[640px]:pt-[22px]',
+  pageHeading: 'mb-6 flex items-end justify-between gap-[18px] max-[640px]:items-start',
+  eyebrow: 'mb-1.5 text-[10px] font-bold tracking-[.11em] text-brand uppercase',
+  h1: 'm-0 text-[25px] leading-[1.25] font-semibold tracking-[-0.04em] text-ink max-[640px]:text-[22px]',
+  breadcrumbs: 'mt-[7px] flex flex-wrap items-center gap-[5px] text-[11px] text-[#8a979a]',
+  breadcrumbButton: 'border-0 bg-transparent p-0 text-inherit hover:text-brand-dark',
+  headingMeta: 'flex flex-col items-end gap-[5px] pb-0.5 max-[640px]:hidden',
+  metaLabel: 'text-[10px] tracking-[.07em] text-[#8a979a] uppercase',
+  metaValue: 'font-mono text-[11px] text-[#526368]',
+  namespaceGrid: 'grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-[9px] max-[640px]:grid-cols-1',
+  namespaceCard: 'flex min-h-[57px] items-center gap-[10px] rounded-[7px] border border-[#e4ebe9] bg-white px-3 py-[11px] text-left text-[#33474b] transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-[#add6ca] hover:bg-[#fbfefd]',
+  namespaceCardIcon: 'grid size-7 place-items-center rounded-md bg-[#edf7f3] text-[14px] text-brand',
+  namespaceCardName: 'flex-1 overflow-hidden text-xs font-semibold text-ellipsis whitespace-nowrap',
+  namespaceCardArrow: 'text-xs text-[#9aabaa]',
+  childNamespaceList: 'border-b border-[#edf1f0] pb-[14px]',
+  tableListHeading: 'mt-[17px] mb-[6px]',
+  tableList: 'border-t border-[#edf1f0]',
+  tableRow: 'flex w-full items-center gap-[11px] border-0 border-b border-[#edf1f0] bg-transparent px-[5px] py-3 text-left hover:bg-[#fbfdfc]',
+  tableIcon: 'text-[15px] text-[#81918f]',
+  tableName: 'font-mono text-xs text-[#293d41]',
+  tableRowHint: 'ml-auto text-[10px] text-[#96a2a3] group-hover:text-brand',
+  muted: 'text-xs leading-[1.6] text-muted',
+  detailsStack: 'grid gap-[14px]',
+  detailStats: 'grid grid-cols-4 gap-[9px] max-[900px]:grid-cols-2 max-[640px]:grid-cols-2',
+  statCard: 'flex min-h-[75px] flex-col justify-between rounded-lg p-[13px_14px] shadow-none max-[640px]:min-h-[68px] max-[640px]:p-[11px]',
+  statLabel: 'text-[10px] text-[#819094]',
+  statValue: 'text-base font-semibold tracking-[-0.02em] text-[#294047] max-[640px]:text-sm',
+  statId: 'overflow-hidden font-mono text-[11px] text-ellipsis whitespace-nowrap',
+  statDate: 'text-[11px]',
+  schemaWrap: 'overflow-x-auto',
+  schemaCode: 'rounded bg-[#f2f6f4] px-[5px] py-[3px] text-[10px] text-[#536d67]',
+  fieldId: 'mr-[5px] inline-block min-w-[35px] font-mono text-[9px] text-[#9aa6a6]',
+  partitionBlock: 'mt-[18px] border-t border-[#edf1f0] pt-[14px]',
+  tagList: 'flex flex-wrap gap-[6px]',
+  tagCode: 'ml-[3px] text-[9px] text-brand',
+  snapshotList: 'border-t border-[#edf1f0]',
+  snapshotRow: 'flex items-center gap-[11px] border-b border-[#edf1f0] px-[2px] py-[10px]',
+  operationIcon: 'grid size-[25px] place-items-center rounded-md bg-[#eef6f3] text-[14px] text-[#638b80]',
+  snapshotMain: 'flex flex-1 flex-col gap-[3px]',
+  snapshotOperation: 'text-[11px] font-semibold text-[#3d5357] capitalize',
+  snapshotDate: 'text-[10px] text-[#889598]',
+  snapshotId: 'font-mono text-[10px] text-[#738184]',
+  pageFooter: 'px-[2px] pt-[5px] text-[10px] text-[#95a1a2]',
+  emptyState: 'mx-auto mt-[12vh] w-[calc(100%_-_32px)] max-w-[560px] rounded-[10px] border border-line bg-white p-[35px] text-center shadow-[0_8px_32px_#19372c08] max-[640px]:mt-[9vh] max-[640px]:px-[18px] max-[640px]:py-6',
+  emptyIcon: 'mx-auto mb-[18px] grid size-[52px] place-items-center rounded-[14px] bg-brand-soft text-[27px] text-brand',
+  emptyParagraph: 'text-xs leading-[1.6] text-[#758387]',
+  codeBlock: 'my-[18px] overflow-x-auto rounded-md border border-[#e5eeea] bg-[#f7faf8] p-3 text-left font-mono text-[10px] text-[#47635b]',
+  emptyLink: 'text-[11px] font-semibold text-brand-dark',
+  settingsPage: 'min-h-screen',
+  settingsContent: 'mx-auto w-[calc(100%_-_36px)] max-w-[900px] pt-[34px] pb-12 max-[640px]:w-[calc(100%_-_28px)] max-[640px]:pt-[23px]',
+  settingsHeading: 'mb-6 flex items-center justify-between gap-[18px] max-[640px]:items-start max-[640px]:flex-col',
+  catalogForm: 'grid grid-cols-2 gap-x-[14px] gap-y-[17px] max-[640px]:grid-cols-1',
+  formLabel: 'grid content-start gap-[7px]',
+  formHint: 'text-[10px] leading-[1.5] text-[#819094]',
+  formWide: 'col-span-2 max-[640px]:col-span-1',
+  optionalLabel: 'ml-[5px] text-[9px] font-medium tracking-normal text-[#a0abad] normal-case',
+  formActions: 'col-span-2 flex items-center gap-3 max-[640px]:col-span-1',
+  configuredList: 'border-t border-[#edf1f0]',
+  configuredRow: 'flex items-center gap-[11px] border-b border-[#edf1f0] px-[2px] py-[11px]',
+  catalogInitial: 'grid size-[31px] flex-none place-items-center rounded-lg bg-brand-soft text-xs font-bold text-brand-dark',
+  configuredName: 'flex flex-1 flex-col gap-[3px] text-xs text-[#33474b]',
+  configuredCode: 'font-mono text-[10px] text-[#8a979a]',
+  settingsFootnote: 'text-[10px] leading-[1.6] text-[#899598]',
+  contractLink: 'text-[11px] font-semibold text-brand-dark hover:underline',
+  workerGrid: 'grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3',
+  workerCard: 'mb-0',
+  workerCardHeading: 'flex items-center gap-[10px]',
+  workerState: 'ml-auto',
+  workerStateDot: 'size-1.5 rounded-full bg-[#aab4b4]',
+  workerRuntime: 'mt-[17px] flex flex-col gap-[5px] text-[10px] text-[#738184]',
+  workerLanguage: 'text-xs font-bold text-ink capitalize',
+  workerError: 'mt-[15px] text-[11px] text-danger',
+  workerEmptyState: 'mt-7',
+}
 
 function namespaceKey(namespace: string[]): string {
   return namespace.join('\u001f')
@@ -27,23 +153,28 @@ function formatDate(timestampMs: number | undefined): string {
 }
 
 function Loading({ label }: { label: string }) {
-  return <p className="muted" role="status">Loading {label}…</p>
+  return (
+    <div className={`${ui.muted} flex items-center gap-2`} role="status">
+      <Skeleton className="size-2 rounded-full" />
+      Loading {label}…
+    </div>
+  )
 }
 
 function ErrorMessage({ message }: { message: string }) {
-  return <p className="error-message" role="alert">{message}</p>
+  return <Alert variant="destructive">{message}</Alert>
 }
 
 function EmptyCatalogs() {
   return (
-    <main className="empty-state">
-      <div className="empty-icon" aria-hidden="true">◇</div>
-      <p className="eyebrow">No catalogs configured</p>
-      <h1>Connect a REST catalog to get started</h1>
-      <p>Connect a REST catalog to browse its namespaces, tables, and table metadata.</p>
-      <Link className="primary-button" to="/settings">Add a catalog</Link>
-      <a href="https://iceberg.apache.org/rest-catalog-spec/" target="_blank" rel="noreferrer">Read the Iceberg REST Catalog spec ↗</a>
-    </main>
+    <Card as="main" className={ui.emptyState}>
+      <div className={ui.emptyIcon} aria-hidden="true"><Database size={24} strokeWidth={1.5} /></div>
+      <p className={ui.eyebrow}>No catalogs configured</p>
+      <h1 className={`${ui.h1} mb-[11px] text-[22px]`}>Connect a REST catalog to get started</h1>
+      <p className={ui.emptyParagraph}>Connect a REST catalog to browse its namespaces, tables, and table metadata.</p>
+      <Link className={cn(buttonVariants(), 'mx-auto mt-3 mb-[15px] text-xs no-underline')} to="/settings">Add a catalog</Link>
+      <a className={ui.emptyLink} href="https://iceberg.apache.org/rest-catalog-spec/" target="_blank" rel="noreferrer">Read the Iceberg REST Catalog spec ↗</a>
+    </Card>
   )
 }
 
@@ -100,84 +231,85 @@ function CatalogSettings() {
   }
 
   return (
-    <div className="settings-page">
-      <header className="topbar">
-        <Link className="brand" to="/" aria-label="Iceberg Control Plane home">
-          <span className="brand-mark" aria-hidden="true"><span /></span>
+    <div className={ui.settingsPage}>
+      <header className={ui.topbar}>
+        <Link className={ui.brand} to="/" aria-label="Iceberg Control Plane home">
+          <span className={ui.brandMark} aria-hidden="true"><span className={ui.brandMarkInner} /></span>
           <span>Iceberg <strong>Control Plane</strong></span>
         </Link>
-        <Link className="back-button" to="/">Back to explorer</Link>
+        <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'no-underline')} to="/">Back to explorer</Link>
       </header>
-      <main className="settings-content">
-        <div className="page-heading">
-          <div><p className="eyebrow">Configuration</p><h1>Catalog connections</h1></div>
-          <span className="read-only-badge"><span />Catalog data stays read only</span>
+      <main className={ui.settingsContent}>
+        <div className={ui.settingsHeading}>
+          <div><p className={ui.eyebrow}>Configuration</p><h1 className={ui.h1}>Catalog connections</h1></div>
+          <Badge variant="outline" size="sm"><span className={ui.statusDot} />Catalog data stays read only</Badge>
         </div>
 
-        <section className="section-card">
-          <div className="content-title"><p className="eyebrow">New connection</p><h2>Add an Iceberg REST catalog</h2></div>
-          <form className="catalog-form" onSubmit={handleSubmit}>
-            <label>
-              <span className="field-label">Catalog ID</span>
-              <input autoComplete="off" maxLength={64} onChange={(event) => updateField('id', event.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" required value={form.id} />
-              <small>Use letters, numbers, hyphens, or underscores.</small>
-            </label>
-            <label>
-              <span className="field-label">Display name</span>
-              <input maxLength={100} onChange={(event) => updateField('name', event.target.value)} required value={form.name} />
-            </label>
-            <label className="form-wide">
-              <span className="field-label">REST catalog URL</span>
-              <input autoComplete="url" onChange={(event) => updateField('uri', event.target.value)} placeholder="https://catalog.example.com" required type="url" value={form.uri} />
-            </label>
-            <label>
-              <span className="field-label">Warehouse <span className="optional-label">Optional</span></span>
-              <input autoComplete="off" onChange={(event) => updateField('warehouse', event.target.value)} value={form.warehouse} />
-            </label>
-            <label>
-              <span className="field-label">Bearer token environment variable <span className="optional-label">Optional</span></span>
-              <input autoComplete="off" onChange={(event) => updateField('bearerTokenEnv', event.target.value)} placeholder="ICEBERG_PRODUCTION_TOKEN" value={form.bearerTokenEnv} />
-              <small>Add the token to the API environment and restart it before saving. The token itself is never sent to this form.</small>
-            </label>
-            <div className="form-actions">
-              <button className="primary-button" disabled={addCatalog.isPending} type="submit">
+        <Card as="section" className="mb-4">
+          <CardHeader><p className={ui.eyebrow}>New connection</p><CardTitle>Add an Iceberg REST catalog</CardTitle></CardHeader>
+          <form className={ui.catalogForm} onSubmit={handleSubmit}>
+            <div className={ui.formLabel}>
+              <Label htmlFor="catalog-id">Catalog ID</Label>
+              <Input id="catalog-id" autoComplete="off" maxLength={64} onChange={(event) => updateField('id', event.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" required value={form.id} />
+              <small className={ui.formHint}>Use letters, numbers, hyphens, or underscores.</small>
+            </div>
+            <div className={ui.formLabel}>
+              <Label htmlFor="catalog-name">Display name</Label>
+              <Input id="catalog-name" maxLength={100} onChange={(event) => updateField('name', event.target.value)} required value={form.name} />
+            </div>
+            <div className={`${ui.formLabel} ${ui.formWide}`}>
+              <Label htmlFor="catalog-uri">REST catalog URL</Label>
+              <Input id="catalog-uri" autoComplete="url" onChange={(event) => updateField('uri', event.target.value)} placeholder="https://catalog.example.com" required type="url" value={form.uri} />
+            </div>
+            <div className={ui.formLabel}>
+              <Label htmlFor="catalog-warehouse">Warehouse <span className={ui.optionalLabel}>Optional</span></Label>
+              <Input id="catalog-warehouse" autoComplete="off" onChange={(event) => updateField('warehouse', event.target.value)} value={form.warehouse} />
+            </div>
+            <div className={ui.formLabel}>
+              <Label htmlFor="catalog-token-env">Bearer token environment variable <span className={ui.optionalLabel}>Optional</span></Label>
+              <Input id="catalog-token-env" autoComplete="off" onChange={(event) => updateField('bearerTokenEnv', event.target.value)} placeholder="ICEBERG_PRODUCTION_TOKEN" value={form.bearerTokenEnv} />
+              <small className={ui.formHint}>Add the token to the API environment and restart it before saving. The token itself is never sent to this form.</small>
+            </div>
+            <div className={ui.formActions}>
+              <Button disabled={addCatalog.isPending} type="submit">
                 {addCatalog.isPending ? 'Saving…' : 'Save catalog'}
-              </button>
-              {saved && <span className="success-message" role="status">Catalog saved.</span>}
+              </Button>
+              {saved && <span className="text-[11px] text-brand-dark" role="status">Catalog saved.</span>}
             </div>
             {addCatalog.isError && <ErrorMessage message={addCatalog.error.message} />}
           </form>
-        </section>
+        </Card>
 
-        <section className="section-card">
-          <div className="section-title-row content-title">
-            <div><p className="eyebrow">Saved locally</p><h2>Configured catalogs</h2></div>
-            <span className="count-pill">{catalogs.data?.length ?? 0}</span>
-          </div>
+        <Card as="section" className="mb-4">
+          <CardHeader className={ui.sectionTitleRow}>
+            <div><p className={ui.eyebrow}>Saved locally</p><CardTitle>Configured catalogs</CardTitle></div>
+            <Badge variant="secondary" size="count">{catalogs.data?.length ?? 0}</Badge>
+          </CardHeader>
           {catalogs.isPending && <Loading label="catalogs" />}
           {catalogs.isError && <ErrorMessage message="Could not load configured catalogs." />}
-          {catalogs.data?.length === 0 && <p className="muted">No catalogs are configured yet.</p>}
+          {catalogs.data?.length === 0 && <p className={ui.muted}>No catalogs are configured yet.</p>}
           {catalogs.data && catalogs.data.length > 0 && (
-            <div className="configured-catalog-list">
+            <div className={ui.configuredList}>
               {catalogs.data.map((catalog) => (
-                <div className="configured-catalog" key={catalog.id}>
-                  <span className="catalog-initial" aria-hidden="true">{catalog.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="configured-catalog-name"><strong>{catalog.name}</strong><code>{catalog.id}</code></span>
-                  <button
-                    className="remove-button"
+                <div className={ui.configuredRow} key={catalog.id}>
+                  <span className={ui.catalogInitial} aria-hidden="true">{catalog.name.slice(0, 1).toUpperCase()}</span>
+                  <span className={ui.configuredName}><strong>{catalog.name}</strong><code className={ui.configuredCode}>{catalog.id}</code></span>
+                  <Button
+                    variant="destructive"
+                    size="xs"
                     disabled={removeCatalog.isPending}
                     onClick={() => removeCatalog.mutate(catalog.id)}
                     type="button"
                   >
                     Remove
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
           {removeCatalog.isError && <ErrorMessage message={removeCatalog.error.message} />}
-        </section>
-        <p className="settings-footnote">Catalog connection settings are stored in a local file on this server. Keep this app on a trusted machine.</p>
+        </Card>
+        <p className={ui.settingsFootnote}>Catalog connection settings are stored in a local file on this server. Keep this app on a trusted machine.</p>
       </main>
     </div>
   )
@@ -194,70 +326,70 @@ function WorkersPage() {
   })
 
   return (
-    <div className="settings-page">
-      <header className="topbar">
-        <Link className="brand" to="/" aria-label="Iceberg Control Plane home">
-          <span className="brand-mark" aria-hidden="true"><span /></span>
+    <div className={ui.settingsPage}>
+      <header className={ui.topbar}>
+        <Link className={ui.brand} to="/" aria-label="Iceberg Control Plane home">
+          <span className={ui.brandMark} aria-hidden="true"><span className={ui.brandMarkInner} /></span>
           <span>Iceberg <strong>Control Plane</strong></span>
         </Link>
-        <Link className="back-button" to="/">Back to explorer</Link>
+        <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'no-underline')} to="/">Back to explorer</Link>
       </header>
-      <main className="settings-content">
-        <div className="page-heading">
-          <div><p className="eyebrow">Polyglot runtime</p><h1>Iceberg workers</h1></div>
-          <a className="contract-link" href="https://github.com/fallintoplace/iceberg-control-plane/blob/main/workers/openapi.yaml" target="_blank" rel="noreferrer">Worker contract v1 ↗</a>
+      <main className={ui.settingsContent}>
+        <div className={ui.settingsHeading}>
+          <div><p className={ui.eyebrow}>Polyglot runtime</p><h1 className={ui.h1}>Iceberg workers</h1></div>
+          <a className={ui.contractLink} href="https://github.com/fallintoplace/iceberg-control-plane/blob/main/workers/openapi.yaml" target="_blank" rel="noreferrer">Worker contract v1 ↗</a>
         </div>
 
         {workers.isPending && <Loading label="workers" />}
         {workers.isError && <ErrorMessage message="Could not load configured workers." />}
         {workers.data?.length === 0 && (
-          <section className="empty-state worker-empty-state">
-            <div className="empty-icon" aria-hidden="true">⌘</div>
-            <p className="eyebrow">No workers configured</p>
-            <h1>Add a Go, Java, or Rust worker</h1>
-            <p>Workers use the versioned HTTP contract. Each worker keeps its own catalog credentials and reports the Iceberg engine and operations it supports.</p>
-            <pre>{`ICEBERG_WORKERS_JSON='[{"id":"iceberg-go","name":"Iceberg Go","uri":"http://localhost:8090"}]'`}</pre>
-          </section>
+          <Card as="section" className={`${ui.emptyState} ${ui.workerEmptyState}`}>
+            <div className={ui.emptyIcon} aria-hidden="true"><Command size={22} strokeWidth={1.5} /></div>
+            <p className={ui.eyebrow}>No workers configured</p>
+            <h1 className={`${ui.h1} mb-[11px] text-[22px]`}>Add a Go, Java, or Rust worker</h1>
+            <p className={ui.emptyParagraph}>Workers use the versioned HTTP contract. Each worker keeps its own catalog credentials and reports the Iceberg engine and operations it supports.</p>
+            <pre className={`${ui.codeBlock} [overflow-wrap:anywhere]`}>{`ICEBERG_WORKERS_JSON='[{"id":"iceberg-go","name":"Iceberg Go","uri":"http://localhost:8090"}]'`}</pre>
+          </Card>
         )}
         {workers.data && workers.data.length > 0 && (
-          <section className="worker-grid" aria-label="Configured workers">
+          <section className={ui.workerGrid} aria-label="Configured workers">
             {workers.data.map((worker, index) => {
               const statusQuery = statuses[index]
               const status = statusQuery?.data?.worker
               const isReady = status?.health.status === 'ready'
               return (
-                <article className="section-card worker-card" key={worker.id}>
-                  <div className="worker-card-heading">
-                    <span className="catalog-initial" aria-hidden="true">{worker.name.slice(0, 1).toUpperCase()}</span>
-                    <div className="configured-catalog-name"><strong>{worker.name}</strong><code>{worker.id}</code></div>
-                    <span className={`worker-state${isReady ? ' is-ready' : status ? ' is-degraded' : ''}`}>
-                      <span />{statusQuery?.isPending ? 'Checking' : statusQuery?.isError ? 'Offline' : status?.health.status ?? 'Unknown'}
-                    </span>
+                <Card as="article" className={ui.workerCard} key={worker.id}>
+                  <div className={ui.workerCardHeading}>
+                    <span className={ui.catalogInitial} aria-hidden="true">{worker.name.slice(0, 1).toUpperCase()}</span>
+                    <div className={ui.configuredName}><strong>{worker.name}</strong><code className={ui.configuredCode}>{worker.id}</code></div>
+                    <Badge variant={isReady ? 'success' : status ? 'destructive' : 'secondary'} className={ui.workerState}>
+                      <span className={`${ui.workerStateDot} ${isReady ? 'bg-[#24a786]' : status ? 'bg-[#c45145]' : ''}`} />{statusQuery?.isPending ? 'Checking' : statusQuery?.isError ? 'Offline' : status?.health.status ?? 'Unknown'}
+                    </Badge>
                   </div>
-                  {statusQuery?.isError && <p className="worker-error">Check the worker URL and API credentials.</p>}
+                  {statusQuery?.isError && <p className={ui.workerError}>Check the worker URL and API credentials.</p>}
                   {status && (
                     <>
-                      <div className="worker-runtime">
-                        <span className="worker-language">{status.health.runtime.language}</span>
+                      <div className={ui.workerRuntime}>
+                        <span className={ui.workerLanguage}>{status.health.runtime.language}</span>
                         <span>{status.health.runtime.engine} {status.health.runtime.engineVersion}</span>
                         <span>Worker {status.health.runtime.version}</span>
                       </div>
-                      <div className="partition-block">
-                        <p className="field-label">Read-only operations</p>
-                        {status.capabilities.operations.length === 0 ? <span className="muted">No operations advertised</span> : (
-                          <div className="tag-list">
-                            {status.capabilities.operations.map((operation) => <span className="tag" key={operation}>{operation}</span>)}
+                      <div className={ui.partitionBlock}>
+                        <p className={`${ui.fieldLabel} mb-[9px]`}>Read-only operations</p>
+                        {status.capabilities.operations.length === 0 ? <span className={ui.muted}>No operations advertised</span> : (
+                          <div className={ui.tagList}>
+                            {status.capabilities.operations.map((operation) => <Badge variant="tag" key={operation}>{operation}</Badge>)}
                           </div>
                         )}
                       </div>
                     </>
                   )}
-                </article>
+                </Card>
               )
             })}
           </section>
         )}
-        <p className="settings-footnote">Configure workers with <code>ICEBERG_WORKERS_JSON</code>. The control plane sends catalog IDs and table identifiers; workers resolve credentials from their own environment.</p>
+        <p className={ui.settingsFootnote}>Configure workers with <code className="font-mono text-[10px] text-[#536d67]">ICEBERG_WORKERS_JSON</code>. The control plane sends catalog IDs and table identifiers; workers resolve credentials from their own environment.</p>
       </main>
     </div>
   )
@@ -277,24 +409,27 @@ function NamespaceLink({
   namespace,
   selected,
   onSelect,
+  className = '',
 }: {
   namespace: NamespaceIdentifier
   selected: string[]
   onSelect: (parts: string[]) => void
+  className?: string
 }) {
   const active = namespaceKey(namespace.namespace) === namespaceKey(selected)
   const name = namespace.namespace.at(-1) ?? namespace.namespace.join('.')
 
   return (
-    <button
-      className={`namespace-link${active ? ' is-active' : ''}`}
+    <Button
+      variant="ghost"
+      className={`${ui.namespaceLink} ${active ? ui.namespaceLinkActive : ''} ${className}`}
       onClick={() => onSelect(namespace.namespace)}
       type="button"
       title={namespace.namespace.join('.')}
     >
-      <span className="namespace-glyph" aria-hidden="true">▦</span>
+      <span className={ui.namespaceGlyph} aria-hidden="true"><Boxes size={14} /></span>
       <span>{name}</span>
-    </button>
+    </Button>
   )
 }
 
@@ -348,58 +483,60 @@ function CatalogExplorer() {
   const namespaceItems = namespaces.data?.pages.flatMap((page) => page.namespaces) ?? []
   const tableItems = tables.data?.pages.flatMap((page) => page.tables) ?? []
   const parentNamespace = selectedNamespace.slice(0, -1)
+  const namespaceCount = namespaces.isError ? '—' : namespaces.isPending ? '…' : namespaceItems.length
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <Link className="brand" to="/" aria-label="Iceberg Control Plane home">
-          <span className="brand-mark" aria-hidden="true"><span /></span>
+    <div className={ui.appShell}>
+      <header className={ui.topbar}>
+        <Link className={ui.brand} to="/" aria-label="Iceberg Control Plane home">
+          <span className={ui.brandMark} aria-hidden="true"><span className={ui.brandMarkInner} /></span>
           <span>Iceberg <strong>Control Plane</strong></span>
         </Link>
-        <div className="topbar-right">
-          <span className="read-only-badge"><span />Read only</span>
-          <Link className="topbar-link" to="/workers">Workers</Link>
-          <Link className="topbar-link" to="/settings">Manage catalogs</Link>
-          <span className="topbar-caption">Catalog operations</span>
+        <div className={ui.topbarRight}>
+          <Badge variant="outline" size="sm" className="max-[640px]:hidden"><span className={ui.statusDot} />Read-only browsing</Badge>
+          <Link className={ui.topbarLink} to="/workers">Workers</Link>
+          <Link className={ui.topbarLink} to="/settings">Manage catalogs</Link>
+          <span className={ui.topbarCaption}>Catalog operations</span>
         </div>
       </header>
 
-      <div className="workspace">
-        <aside className="sidebar">
-          <div className="sidebar-section">
-            <label className="field-label" htmlFor="catalog-select">Catalog</label>
-            <select
+      <div className={ui.workspace}>
+        <aside className={ui.sidebar}>
+          <div className={ui.sidebarSection}>
+            <NativeSelect
               id="catalog-select"
+              label="Catalog"
+              labelClassName="mb-[9px]"
+              className="w-full"
+              options={catalogs.data.map((item) => ({ value: item.id, label: item.name }))}
               value={catalog.id}
               onChange={(event) => navigate(`/catalog/${encodeURIComponent(event.target.value)}`)}
-            >
-              {catalogs.data.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-            <div className={`connection-state ${status.data ? 'connected' : status.isError ? 'disconnected' : ''}`}>
-              <span className="connection-dot" />
-              {status.isPending ? 'Checking connection' : status.isError ? 'Connection unavailable' : 'Connected'}
+            />
+            <div className={`${ui.connectionState} ${status.isError ? 'text-danger' : ''}`}>
+              <span className={`${ui.statusDot} ${status.isPending ? 'bg-[#aab4b4]' : status.isError ? 'bg-[#c45145]' : ''}`} />
+              {status.isPending ? 'Checking catalog API' : status.isError ? 'Catalog API unavailable' : 'Catalog API reachable'}
             </div>
-            {status.isError && <p className="sidebar-error">Check the catalog URI and server credentials.</p>}
+            {status.isError && <p className={ui.sidebarError}>Check the catalog URI and server credentials.</p>}
           </div>
 
-          <div className="sidebar-section namespace-section">
-            <div className="section-title-row">
-              <span className="field-label">Namespaces</span>
-              <span className="count-pill">{namespaceItems.length}</span>
+          <div className={ui.sidebarSectionCompact}>
+            <div className={ui.sectionTitleRow}>
+              <span className={ui.fieldLabel}>Namespaces</span>
+              <Badge variant={namespaces.isError ? 'destructive' : 'secondary'} size="count">{namespaceCount}</Badge>
             </div>
-            <button className={`namespace-link${selectedNamespace.length === 0 ? ' is-active' : ''}`} onClick={() => setLocation([])} type="button">
-              <span className="namespace-glyph" aria-hidden="true">⌂</span>
+            <Button variant="ghost" className={`${ui.namespaceLink} ${selectedNamespace.length === 0 ? ui.namespaceLinkActive : ''}`} onClick={() => setLocation([])} type="button">
+              <span className={ui.namespaceGlyph} aria-hidden="true"><HomeIcon size={14} /></span>
               <span>All namespaces</span>
-            </button>
+            </Button>
             {selectedNamespace.length > 0 && (
-              <button className="namespace-link parent-link" onClick={() => setLocation(parentNamespace)} type="button">
-                <span className="namespace-glyph" aria-hidden="true">↰</span>
+              <Button variant="ghost" className={`${ui.namespaceLink} ${ui.parentLink}`} onClick={() => setLocation(parentNamespace)} type="button">
+                <span className={ui.namespaceGlyph} aria-hidden="true"><CornerLeftUp size={14} /></span>
                 <span>{parentNamespace.at(-1) ?? 'Root'}</span>
-              </button>
+              </Button>
             )}
-            {namespaces.isPending && <p className="muted compact">Loading…</p>}
-            {namespaces.isError && <p className="sidebar-error">Could not load namespaces.</p>}
-            <div className="namespace-list">
+            {namespaces.isPending && <p className={`${ui.muted} ${ui.compact}`}>Loading…</p>}
+            {namespaces.isError && <p className={ui.sidebarError}>Could not load namespaces.</p>}
+            <div className={ui.namespaceList}>
               {namespaceItems.map((item) => (
                 <NamespaceLink
                   key={namespaceKey(item.namespace)}
@@ -410,109 +547,120 @@ function CatalogExplorer() {
               ))}
             </div>
             {namespaces.hasNextPage && (
-              <button className="load-more" onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
+              <Button variant="ghost" size="xs" className={ui.loadMore} onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
                 {namespaces.isFetchingNextPage ? 'Loading…' : 'Load more'}
-              </button>
+              </Button>
             )}
           </div>
-          <div className="sidebar-footnote">Catalog credentials stay on the server.</div>
+          <div className={ui.sidebarFootnote}>Catalog credentials stay on the server.</div>
         </aside>
 
-        <main className="main-content">
-          <div className="page-heading">
+        <main className={ui.mainContent}>
+          <div className={ui.pageHeading}>
             <div>
-              <p className="eyebrow">Catalog explorer</p>
-              <h1>{selectedTable ?? selectedNamespace.at(-1) ?? catalog.name}</h1>
-              <nav className="breadcrumbs" aria-label="Breadcrumb">
-                <button onClick={() => setLocation([])} type="button">{catalog.name}</button>
+              <p className={ui.eyebrow}>Catalog explorer</p>
+              <h1 className={ui.h1}>{selectedTable ?? selectedNamespace.at(-1) ?? catalog.name}</h1>
+              <Breadcrumb className={ui.breadcrumbs}>
+                <BreadcrumbList>
+                  <BreadcrumbItem>
+                    <Button variant="link" size="xs" className={ui.breadcrumbButton} onClick={() => setLocation([])} type="button">{catalog.name}</Button>
+                  </BreadcrumbItem>
                 {selectedNamespace.map((part, index) => (
-                  <span key={`${part}-${index}`}>
-                    <span className="breadcrumb-separator">/</span>
-                    <button onClick={() => setLocation(selectedNamespace.slice(0, index + 1))} type="button">{part}</button>
-                  </span>
+                  <BreadcrumbItem key={`${part}-${index}`}>
+                    <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                    <Button variant="link" size="xs" className={ui.breadcrumbButton} onClick={() => setLocation(selectedNamespace.slice(0, index + 1))} type="button">{part}</Button>
+                  </BreadcrumbItem>
                 ))}
-                {selectedTable && <span><span className="breadcrumb-separator">/</span>{selectedTable}</span>}
-              </nav>
+                {selectedTable && <BreadcrumbItem><BreadcrumbSeparator>/</BreadcrumbSeparator>{selectedTable}</BreadcrumbItem>}
+                </BreadcrumbList>
+              </Breadcrumb>
             </div>
-            <div className="heading-meta">
-              <span className="meta-label">REST endpoint</span>
-              <span className="meta-value">{status.data ? `${status.data.endpoints.length} advertised features` : '—'}</span>
+            <div className={ui.headingMeta}>
+              <span className={ui.metaLabel}>REST endpoints</span>
+              <span className={ui.metaValue}>{status.data ? `${status.data.endpoints.length} advertised endpoints` : '—'}</span>
             </div>
           </div>
 
           {selectedTable ? (
-            <TableDetails query={table} tableName={selectedTable} onBack={() => setLocation(selectedNamespace)} />
+            <TableDetails
+              catalogId={catalog.id}
+              namespace={selectedNamespace}
+              query={table}
+              tableName={selectedTable}
+              onBack={() => setLocation(selectedNamespace)}
+            />
           ) : selectedNamespace.length === 0 ? (
-            <section className="section-card">
-              <div className="section-title-row content-title">
-                <div><p className="eyebrow">Browse</p><h2>Top-level namespaces</h2></div>
-                <span className="count-pill">{namespaceItems.length}</span>
-              </div>
+            <Card as="section" className="mb-4">
+              <CardHeader className={ui.sectionTitleRow}>
+                <div><p className={ui.eyebrow}>Browse</p><CardTitle>Top-level namespaces</CardTitle></div>
+                <Badge variant={namespaces.isError ? 'destructive' : 'secondary'} size="count">{namespaceCount}</Badge>
+              </CardHeader>
               {namespaces.isError && <ErrorMessage message="The catalog did not return its namespaces." />}
-              {namespaceItems.length === 0 && !namespaces.isPending && <p className="muted">No namespaces were found in this catalog.</p>}
-              <div className="namespace-grid">
+              {namespaceItems.length === 0 && !namespaces.isPending && !namespaces.isError && <p className={ui.muted}>No namespaces were found in this catalog.</p>}
+              <div className={ui.namespaceGrid}>
                 {namespaceItems.map((item) => (
-                  <button className="namespace-card" key={namespaceKey(item.namespace)} onClick={() => setLocation(item.namespace)} type="button">
-                    <span className="namespace-card-icon" aria-hidden="true">▦</span>
-                    <span className="namespace-card-name">{item.namespace.join(' / ')}</span>
-                    <span className="namespace-card-arrow" aria-hidden="true">↗</span>
-                  </button>
+                  <Button variant="ghost" className={ui.namespaceCard} key={namespaceKey(item.namespace)} onClick={() => setLocation(item.namespace)} type="button">
+                    <span className={ui.namespaceCardIcon} aria-hidden="true"><Boxes size={15} /></span>
+                    <span className={ui.namespaceCardName}>{item.namespace.join(' / ')}</span>
+                    <span className={ui.namespaceCardArrow} aria-hidden="true"><ArrowUpRight size={13} /></span>
+                  </Button>
                 ))}
               </div>
               {namespaces.hasNextPage && (
-                <button className="secondary-button" onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
+                <Button variant="secondary" className="mt-[15px]" onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
                   {namespaces.isFetchingNextPage ? 'Loading…' : 'Load more namespaces'}
-                </button>
+                </Button>
               )}
-            </section>
+            </Card>
           ) : (
-            <section className="section-card">
-              <div className="section-title-row content-title">
-                <div><p className="eyebrow">Namespace</p><h2>{selectedNamespace.join(' / ')}</h2></div>
-                <span className="count-pill">{tableItems.length} tables</span>
-              </div>
+            <Card as="section" className="mb-4">
+              <CardHeader className={ui.sectionTitleRow}>
+                <div><p className={ui.eyebrow}>Namespace</p><CardTitle>{selectedNamespace.join(' / ')}</CardTitle></div>
+                <Badge variant="secondary" size="count" className="w-auto gap-1.5 font-sans text-[10px]">{tableItems.length} tables</Badge>
+              </CardHeader>
               {namespaces.isError && <ErrorMessage message="Could not load child namespaces." />}
               {namespaceItems.length > 0 && (
-                <div className="child-namespace-list">
-                  <p className="field-label">Child namespaces</p>
+                <div className={ui.childNamespaceList}>
+                  <p className={`${ui.fieldLabel} mb-2`}>Child namespaces</p>
                   {namespaceItems.map((item) => (
                     <NamespaceLink
                       key={namespaceKey(item.namespace)}
                       namespace={item}
                       selected={selectedNamespace}
                       onSelect={(parts) => setLocation(parts)}
+                      className="max-w-[420px] border border-[#edf1f0]"
                     />
                   ))}
                   {namespaces.hasNextPage && (
-                    <button className="load-more" onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
+                    <Button variant="ghost" size="xs" className={ui.loadMore} onClick={() => void namespaces.fetchNextPage()} disabled={namespaces.isFetchingNextPage}>
                       {namespaces.isFetchingNextPage ? 'Loading…' : 'Load more'}
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
-              <div className="table-list-heading"><p className="field-label">Tables</p></div>
+              <div className={ui.tableListHeading}><p className={ui.fieldLabel}>Tables</p></div>
               {tables.isPending && <Loading label="tables" />}
               {tables.isError && <ErrorMessage message="The catalog did not return its tables." />}
-              {tableItems.length === 0 && !tables.isPending && !tables.isError && <p className="muted">No tables in this namespace.</p>}
+              {tableItems.length === 0 && !tables.isPending && !tables.isError && <p className={ui.muted}>No tables in this namespace.</p>}
               {tableItems.length > 0 && (
-                <div className="table-list">
+                <div className={ui.tableList}>
                   {tableItems.map((item: TableIdentifier) => (
-                    <button className="table-row" key={`${namespaceKey(item.namespace)}:${item.name}`} onClick={() => setLocation(selectedNamespace, item.name)} type="button">
-                      <span className="table-icon" aria-hidden="true">▤</span>
-                      <span className="table-name">{item.name}</span>
-                      <span className="table-row-hint">Inspect table <span aria-hidden="true">→</span></span>
-                    </button>
+                    <Button variant="ghost" className={`${ui.tableRow} group`} key={`${namespaceKey(item.namespace)}:${item.name}`} onClick={() => setLocation(selectedNamespace, item.name)} type="button">
+                      <span className={ui.tableIcon} aria-hidden="true"><Table2 size={15} /></span>
+                      <span className={ui.tableName}>{item.name}</span>
+                      <span className={ui.tableRowHint}>Inspect table <ArrowRight aria-hidden="true" size={12} /></span>
+                    </Button>
                   ))}
                 </div>
               )}
               {tables.hasNextPage && (
-                <button className="secondary-button" onClick={() => void tables.fetchNextPage()} disabled={tables.isFetchingNextPage}>
+                <Button variant="secondary" className="mt-[15px]" onClick={() => void tables.fetchNextPage()} disabled={tables.isFetchingNextPage}>
                   {tables.isFetchingNextPage ? 'Loading…' : 'Load more tables'}
-                </button>
+                </Button>
               )}
-            </section>
+            </Card>
           )}
-          <footer className="page-footer">Read-only catalog browsing · Iceberg REST API</footer>
+          <footer className={ui.pageFooter}>Catalog browsing is read-only · lesson writes are limited to the local fixture</footer>
         </main>
       </div>
     </div>
@@ -520,10 +668,14 @@ function CatalogExplorer() {
 }
 
 function TableDetails({
+  catalogId,
+  namespace,
   query,
   tableName,
   onBack,
 }: {
+  catalogId: string
+  namespace: string[]
   query: UseQueryResult<{ table: TableSummary }, Error>
   tableName: string
   onBack: () => void
@@ -531,87 +683,99 @@ function TableDetails({
   if (query.isPending) return <Loading label="table metadata" />
   if (query.isError) {
     return (
-      <section className="section-card">
-        <button className="back-button" onClick={onBack} type="button">← Back to tables</button>
+      <Card as="section" className="mb-4 grid gap-3">
+        <Button variant="outline" size="sm" className="w-fit" onClick={onBack} type="button">← Back to tables</Button>
         <ErrorMessage message={`Could not load ${tableName}. Check the catalog connection and table permissions.`} />
-      </section>
+      </Card>
     )
   }
 
   const table = query.data.table
   return (
-    <div className="details-stack">
-      <div className="detail-stats">
-        <div className="stat-card"><span>Format version</span><strong>v{table.formatVersion}</strong></div>
-        <div className="stat-card"><span>Snapshots</span><strong>{table.snapshotCount}</strong></div>
-        <div className="stat-card"><span>Current snapshot</span><strong className="stat-id">{table.currentSnapshotId ?? 'None'}</strong></div>
-        <div className="stat-card"><span>Last updated</span><strong className="stat-date">{formatDate(table.lastUpdatedMs)}</strong></div>
+    <div className={ui.detailsStack}>
+      <WorkerWorkbench
+        key={JSON.stringify([catalogId, namespace, tableName])}
+        catalogId={catalogId}
+        namespace={namespace}
+        tableName={tableName}
+        currentSnapshotId={table.currentSnapshotId}
+        snapshotCount={table.snapshotCount}
+        onTableUpdated={query.refetch}
+      />
+      <div className={ui.detailStats}>
+        <Card className={ui.statCard}><span className={ui.statLabel}>Format version</span><strong className={ui.statValue}>v{table.formatVersion}</strong></Card>
+        <Card className={ui.statCard}><span className={ui.statLabel}>Snapshots</span><strong className={ui.statValue}>{table.snapshotCount}</strong></Card>
+        <Card className={ui.statCard}><span className={ui.statLabel}>Current snapshot</span><strong className={`${ui.statValue} ${ui.statId}`}>{table.currentSnapshotId ?? 'None'}</strong></Card>
+        <Card className={ui.statCard}><span className={ui.statLabel}>Last updated</span><strong className={`${ui.statValue} ${ui.statDate}`}>{formatDate(table.lastUpdatedMs)}</strong></Card>
       </div>
 
-      <section className="section-card">
-        <div className="section-title-row content-title">
-          <div><p className="eyebrow">Table metadata</p><h2>Current schema</h2></div>
-          <button className="back-button" onClick={onBack} type="button">← Back to tables</button>
-        </div>
+      <Card as="section" className="mb-4">
+        <CardHeader className={ui.sectionTitleRow}>
+          <div><p className={ui.eyebrow}>Table metadata</p><CardTitle>Current schema</CardTitle></div>
+          <Button variant="outline" size="xs" onClick={onBack} type="button">← Back to tables</Button>
+        </CardHeader>
         {table.currentSchema ? (
-          <div className="schema-table-wrap">
-            <table className="schema-table">
-              <thead><tr><th>Field</th><th>Type</th><th>Required</th></tr></thead>
-              <tbody>
+          <div className={ui.schemaWrap}>
+            <Table>
+              <TableHeader><TableRow><TableHead>Field</TableHead><TableHead>Type</TableHead><TableHead>Required</TableHead></TableRow></TableHeader>
+              <TableBody>
                 {table.currentSchema.fields.map((field) => (
-                  <tr key={field.id}>
-                    <td><span className="field-id">#{field.id}</span>{field.name}</td>
-                    <td><code>{typeof field.type === 'string' ? field.type : field.type.type}</code></td>
-                    <td>{field.required ? 'Yes' : 'No'}</td>
-                  </tr>
+                  <TableRow key={field.id}>
+                    <TableCell className="font-mono text-[#253c40]"><span className={ui.fieldId}>#{field.id}</span>{field.name}</TableCell>
+                    <TableCell><code className={ui.schemaCode}>{typeof field.type === 'string' ? field.type : field.type.type}</code></TableCell>
+                    <TableCell>{field.required ? 'Yes' : 'No'}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        ) : <p className="muted">No current schema was returned.</p>}
+        ) : <p className={ui.muted}>No current schema was returned.</p>}
         {table.currentPartitionSpec && (
-          <div className="partition-block">
-            <p className="field-label">Current partition spec</p>
-            {table.currentPartitionSpec.fields.length === 0 ? <span className="muted">Unpartitioned</span> : (
-              <div className="tag-list">
-                {table.currentPartitionSpec.fields.map((field) => <span className="tag" key={field['field-id']}>{field.name} <code>{field.transform}</code></span>)}
+          <div className={ui.partitionBlock}>
+            <p className={`${ui.fieldLabel} mb-[9px]`}>Current partition spec</p>
+            {table.currentPartitionSpec.fields.length === 0 ? <span className={ui.muted}>Unpartitioned</span> : (
+              <div className={ui.tagList}>
+                {table.currentPartitionSpec.fields.map((field) => <Badge variant="tag" className="font-mono" key={field['field-id']}>{field.name} <code className={ui.tagCode}>{field.transform}</code></Badge>)}
               </div>
             )}
           </div>
         )}
-        <div className="partition-block">
-          <p className="field-label">Branches and tags</p>
-          {Object.keys(table.refs).length === 0 ? <span className="muted">No snapshot references</span> : (
-            <div className="tag-list">
+        <div className={ui.partitionBlock}>
+          <p className={`${ui.fieldLabel} mb-[9px]`}>Branches and tags</p>
+          {Object.keys(table.refs).length === 0 ? <span className={ui.muted}>No snapshot references</span> : (
+            <div className={ui.tagList}>
               {Object.entries(table.refs).map(([name, ref]) => (
-                <span className="tag" key={name}>{name} <code>{ref.type}</code></span>
+                <Badge variant="tag" className="font-mono" key={name}>{name} <code className={ui.tagCode}>{ref.type}</code></Badge>
               ))}
             </div>
           )}
         </div>
-      </section>
+      </Card>
 
-      <section className="section-card">
-        <div className="section-title-row content-title">
-          <div><p className="eyebrow">Table history</p><h2>Snapshots</h2></div>
-          <span className="count-pill">{table.snapshotCount}</span>
-        </div>
-        {table.snapshotsTruncated && <p className="muted compact">Showing the 100 most recent snapshots.</p>}
-        {table.snapshots.length === 0 ? <p className="muted">No snapshots were returned.</p> : (
-          <div className="snapshot-list">
-            {table.snapshots.map((snapshot) => (
-              <div className="snapshot-row" key={snapshot.snapshotId}>
-                <span className={`operation-icon operation-${snapshot.operation}`} aria-hidden="true">{snapshot.operation === 'append' ? '＋' : snapshot.operation === 'delete' ? '−' : '↻'}</span>
-                <div className="snapshot-main">
-                  <strong>{snapshot.operation}</strong>
-                  <span>{formatDate(snapshot.timestampMs)}</span>
+      <Card as="section" className="mb-4">
+        <CardHeader className={ui.sectionTitleRow}>
+          <div><p className={ui.eyebrow}>Table history</p><CardTitle>Snapshots</CardTitle></div>
+          <Badge variant="secondary" size="count">{table.snapshotCount}</Badge>
+        </CardHeader>
+        {table.snapshotsTruncated && <p className={`${ui.muted} ${ui.compact}`}>Showing the 100 most recent snapshots.</p>}
+        {table.snapshots.length === 0 ? <p className={ui.muted}>No snapshots were returned.</p> : (
+          <div className={ui.snapshotList}>
+            {table.snapshots.map((snapshot) => {
+              const SnapshotIcon = snapshot.operation === 'append' ? Plus : snapshot.operation === 'delete' ? Minus : RefreshCw
+              return (
+                <div className={ui.snapshotRow} key={snapshot.snapshotId}>
+                  <span className={`${ui.operationIcon} ${snapshot.operation === 'delete' ? 'bg-[#fbf1ef] text-[#ae6256]' : snapshot.operation === 'replace' || snapshot.operation === 'overwrite' ? 'bg-[#faf6e9] text-[#967a39]' : ''}`} aria-hidden="true"><SnapshotIcon size={14} /></span>
+                  <div className={ui.snapshotMain}>
+                    <strong className={ui.snapshotOperation}>{snapshot.operation}</strong>
+                    <span className={ui.snapshotDate}>{formatDate(snapshot.timestampMs)}</span>
+                  </div>
+                  <span className={ui.snapshotId}>{snapshot.snapshotId}</span>
                 </div>
-                <span className="snapshot-id">{snapshot.snapshotId}</span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
-      </section>
+      </Card>
     </div>
   )
 }

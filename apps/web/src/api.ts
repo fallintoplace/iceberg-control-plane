@@ -47,6 +47,8 @@ export type WorkerJobSubmission =
       table: TableIdentifier
       options: { rowLimit: number }
     }
+  | { protocolVersion: 1; requestId?: string; operation: 'tutorial.append'; catalogId: string }
+  | { protocolVersion: 1; requestId?: string; operation: 'tutorial.reset'; catalogId: string }
 
 export interface WorkerJobAccepted {
   protocolVersion: 1
